@@ -210,3 +210,13 @@
 .cg-ctrl-hint { margin-top: 8px; font-size: var(--font-ui-smaller); color: var(--text-faint); }
 .cg-controls > .cg-sec { margin-top: 4px; }
 .cg-code { font-family: var(--font-monospace); font-size: var(--font-ui-smaller); background: var(--background-secondary); padding: 8px 10px; border-radius: 6px; white-space: pre-wrap; user-select: text; }
+
+/* settings panel as tabs (one section at a time, graph stays visible) */
+.cg-panel { width: min(380px, calc(100% - 16px)); }
+.cg-panel-body { display: block; columns: auto; }
+.cg-tabpage { width: 100%; min-width: 0; margin: 0; }
+.cg-tabpage > .cg-sec { display: none; }
+.cg-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 8px; }
+.cg-tab { font-size: var(--font-ui-smaller); padding: 3px 9px; height: auto; border-radius: 12px; background: transparent; box-shadow: none; border: 1px solid var(--cg-border); color: var(--text-muted); }
+.cg-tab.is-active { background: var(--interactive-accent); color: var(--text-on-accent); border-color: var(--interactive-accent); }
+.cg-root.is-mobile .cg-panel { width: auto; }

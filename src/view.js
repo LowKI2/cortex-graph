@@ -1061,13 +1061,14 @@ export class CortexGraphView extends ItemView {
     hb(t('reset'), () => { this.plugin.resetStyle(); this.fillPanel(); this.R.setStyle(this.styleObj()); this.simSend({ cmd: 'params', params: this.simParams() }); });
     const x = head.createEl('button', { cls: 'clickable-icon', attr: { 'aria-label': t('close') } }); setIcon(x, 'x');
     x.onclick = () => { p.toggle(false); this.updateToolbar(); };
+    this.panelTabs = p.createDiv({ cls: 'cg-tabs' });
     this.panelBody = p.createDiv({ cls: 'cg-panel-body' });
   }
 
   fillPanel() {
     if (this.capture) this.capture();
     this.panelBody.empty();
-    const body = this.panelBody.createDiv({ cls: 'cg-pcols' });
+    const body = this.panelBody;
     const st = this.plugin.settings.style;
     let sec = body;
     for (const row of PANEL) {
@@ -1093,6 +1094,25 @@ export class CortexGraphView extends ItemView {
     sel.value = ps.shapeDefault || 'kreis';
     sel.onchange = () => { ps.shapeDefault = sel.value; this.plugin.saveSettings(); this.plugin.views().forEach((w) => w.reshape()); };
     this.fillControls(this.panelBody);
+    this.buildTabs();
+  }
+
+  /* one section per tab, so the graph stays visible while adjusting */
+  buildTabs() {
+    const pages = [...this.panelBody.children].filter((el) => el.hasClass('cg-sec-wrap') || el.hasClass('cg-controls'));
+    const KEYS = ['tabForces', 'tabNodes', 'tabLabels', 'tabShapes', 'tabKeys', 'tabMouse'];
+    const bar = this.panelTabs; bar.empty();
+    const cur = Math.min(pages.length - 1, Math.max(0, this.plugin.settings.panelTab || 0));
+    pages.forEach((pg, i) => {
+      pg.addClass('cg-tabpage'); pg.toggle(i === cur);
+      const b = bar.createEl('button', { cls: 'cg-tab' + (i === cur ? ' is-active' : ''), text: t(KEYS[i] || 'panel') });
+      b.onclick = () => {
+        if (this.capture) this.capture();
+        this.plugin.settings.panelTab = i; this.plugin.saveSettings();
+        pages.forEach((p, j) => p.toggle(j === i));
+        bar.querySelectorAll('.cg-tab').forEach((x, j) => x.toggleClass('is-active', j === i));
+      };
+    });
   }
 
   fillControls(body) {
