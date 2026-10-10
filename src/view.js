@@ -1100,20 +1100,21 @@ export class CortexGraphView extends ItemView {
   /* one section per tab, so the graph stays visible while adjusting */
   buildTabs() {
     const pages = [...this.panelBody.children].filter((el) => el.hasClass('cg-sec-wrap') || el.hasClass('cg-controls'));
-    const KEYS = ['tabForces', 'tabNodes', 'tabLabels', 'tabShapes', 'tabKeys', 'tabMouse'];
+    const GROUPS = [['tabGraph', [0, 1]], ['tabLook', [2, 3]], ['tabControls', [4, 5]]];
     const bar = this.panelTabs; bar.empty();
-    const cur = Math.min(pages.length - 1, Math.max(0, this.plugin.settings.panelTab || 0));
-    pages.forEach((pg, i) => {
-      pg.addClass('cg-tabpage'); pg.toggle(i === cur);
-      const b = bar.createEl('button', { cls: 'cg-tab' + (i === cur ? ' is-active' : ''), text: t(KEYS[i] || 'panel') });
-      b.onclick = () => {
-        if (this.capture) this.capture();
-        this.plugin.settings.panelTab = i; this.plugin.saveSettings();
-        pages.forEach((p, j) => p.toggle(j === i));
-        bar.querySelectorAll('.cg-tab').forEach((x, j) => x.toggleClass('is-active', j === i));
-      };
+    const cur = Math.min(GROUPS.length - 1, Math.max(0, this.plugin.settings.panelTab || 0));
+    const show = (g) => {
+      pages.forEach((pg, k) => pg.toggle(GROUPS[g][1].includes(k)));
+      bar.querySelectorAll('.cg-tab').forEach((x, j) => x.toggleClass('is-active', j === g));
+    };
+    pages.forEach((pg) => pg.addClass('cg-tabpage'));
+    GROUPS.forEach(([key], g) => {
+      const b = bar.createEl('button', { cls: 'cg-tab', text: t(key) });
+      b.onclick = () => { if (this.capture) this.capture(); this.plugin.settings.panelTab = g; this.plugin.saveSettings(); show(g); };
     });
+    show(cur);
   }
+
 
   fillControls(body) {
     const ps = this.plugin.settings;
