@@ -934,6 +934,7 @@ export class CortexGraphView extends ItemView {
     });
     const tb = (icon, label, fn) => { const b = bar.createEl('button', { cls: 'cg-tool clickable-icon', attr: { 'aria-label': label } }); setIcon(b, icon); b.onclick = fn; return b; };
     this.btnLabels = tb('type', t('sLabels'), () => { this.plugin.settings.labels = !this.plugin.settings.labels; this.plugin.saveSettings(); this.plugin.refreshViews('style'); this.plugin.views().forEach((v) => v.updateToolbar()); });
+    this.btnRotate = tb('rotate-3d', t('rotate'), () => { this.plugin.settings.rotate = !this.plugin.settings.rotate; this.plugin.saveSettings(); this.plugin.refreshViews('style'); });
     this.btnActivity = tb('flame', t('activity'), () => { this.activity = !this.activity; this.plugin.settings.activity = this.activity; this.plugin.saveSettings(); this.updateToolbar(); this.applyHeat(); });
     this.btnReview = tb('calendar-clock', t('reviewTitle'), (e) => this.reviewMenu(e));
     this.btnViews = tb('bookmark', t('viewsTitle'), (e) => this.viewsMenu(e));
@@ -951,6 +952,7 @@ export class CortexGraphView extends ItemView {
     this.depthBtns.forEach((b, i) => b.toggleClass('is-active', i + 1 === this.depth));
     this.btnActivity.toggleClass('is-active', this.activity);
     this.btnLabels.toggleClass('is-active', this.plugin.settings.labels);
+    this.btnRotate.toggleClass('is-active', !!this.plugin.settings.rotate);
     this.btnProblems.toggleClass('is-active', this.problems);
     this.btnTime.toggleClass('is-active', !!this.tlOn);
     this.btnReview.toggleClass('is-active', !!this.reviewKey);
@@ -1090,10 +1092,6 @@ export class CortexGraphView extends ItemView {
     for (const k of ['kreis', 'ring', 'stern', 'raute', 'quadrat']) sel.createEl('option', { value: k, text: t('shape_' + k) });
     sel.value = ps.shapeDefault || 'kreis';
     sel.onchange = () => { ps.shapeDefault = sel.value; this.plugin.saveSettings(); this.plugin.views().forEach((w) => w.reshape()); };
-    const wrap = sec.createEl('label', { cls: 'cg-row cg-row-check' });
-    wrap.createSpan({ text: t('rotate') });
-    const cb = wrap.createEl('input', { type: 'checkbox' }); cb.checked = this.plugin.settings.rotate;
-    cb.onchange = () => { this.plugin.settings.rotate = cb.checked; this.plugin.saveSettings(); this.plugin.refreshViews('style'); };
     this.fillControls(this.panelBody);
   }
 
@@ -1171,7 +1169,7 @@ export class CortexGraphView extends ItemView {
   /* called by plugin when settings change */
   onSettingsChanged(what) {
     if (!this.R || !this.R.active) return;
-    if (what === 'style') { this.R.showLabels = this.plugin.settings.labels; this.R.setStyle(this.styleObj()); }
+    if (what === 'style') { this.R.showLabels = this.plugin.settings.labels; this.R.setStyle(this.styleObj()); this.updateToolbar(); }
     else if (what === 'theme') this.applyTheme();
     else if (what === 'heat') this.applyHeat();
     else { this.sig = ''; this.rebuild(what === 'layout'); }
