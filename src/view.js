@@ -446,7 +446,7 @@ export class CortexGraphView extends ItemView {
     for (const f of [0.1, 0.25, 0.5, 1, 2, 3, 5, 10]) mul.createEl('option', { value: String(f), text: '× ' + String(f).replace('.', ',') });
     mul.value = '1'; this.tl.factor = 1;
     mul.onchange = () => { this.tl.factor = Number(mul.value); };
-    this.recBtn = row1.createEl('button', { cls: 'cg-time-rec clickable-icon', attr: { 'aria-label': t('tlRecord') } }); setIcon(this.recBtn, 'video');
+    this.recBtn = row1.createEl('button', { cls: 'cg-time-rec clickable-icon', attr: { 'aria-label': t('tlRecord') } }); setIcon(this.recBtn, 'circle');
     this.recBtn.onclick = () => (this.R.rec ? this.finishRecording() : this.startRecording());
     this.tlCount = row1.createSpan({ cls: 'cg-time-count' });
     const x = row1.createEl('button', { cls: 'clickable-icon', attr: { 'aria-label': t('close') } }); setIcon(x, 'x');
@@ -556,7 +556,7 @@ export class CortexGraphView extends ItemView {
     const fmt = (v) => moment(v).format(tl.hi - tl.lo < 4 * 86400000 ? 'DD.MM.YYYY HH:mm' : 'DD.MM.YYYY');
     const ok = this.R.startCapture(() => fmt(this.timeAt(tl.to)) + (tl.tag ? '   #' + tl.tag : '') + '   ' + (this.R.mask ? this.R.mask.size : '') + ' ' + t('notes'));
     if (!ok) { new Notice(t('tlRecNo')); return; }
-    this.recBtn.addClass('is-recording');
+    this.recBtn.addClass('is-recording'); setIcon(this.recBtn, 'square');
     tl.to = tl.from; this.tlTo.rg.value = String(tl.to * 1000);
     this.applyMask();
     window.setTimeout(() => this.startPlay(), 600);
@@ -564,17 +564,25 @@ export class CortexGraphView extends ItemView {
 
   async finishRecording() {
     if (!this.R.rec) return;
-    this.recBtn.removeClass('is-recording');
+    this.stopPlay();
+    this.recBtn.removeClass('is-recording'); setIcon(this.recBtn, 'circle');
     const blob = await this.R.stopCapture();
     if (!blob || !blob.size) return;
     const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
     const name = 'Cortex Graph ' + moment().format('YYYY-MM-DD HH-mm-ss') + '.' + ext;
+    if (this.plugin.settings.recSave === 'auto') { await this.saveToVault(blob, name, true); return; }
+    new RecordingModal(this, blob, name).open();
+  }
+
+  async saveToVault(blob, name, open) {
     let path = name;
     try { path = await this.app.fileManager.getAvailablePathForAttachment(name); } catch { /* use vault root */ }
     const f = await this.app.vault.createBinary(path, await blob.arrayBuffer());
     new Notice(t('tlRecSaved', f.path));
-    this.app.workspace.getLeaf('tab').openFile(f);
+    if (open) this.app.workspace.getLeaf('tab').openFile(f);
+    return f;
   }
+
 
   stopPlay() {
     if (!this.tl) return;
@@ -876,4 +884,27 @@ function addFolderAnchors(G) {
   }
   for (let i = 0; i < anchors.size; i++) G.adj.push([]);
   G.idx = new Map(G.nodes.map((nd, k) => [nd.key, k]));
+}
+
+/* after a recording: preview, then save as (download), save into the vault or discard */
+class RecordingModal extends Modal {
+  constructor(view, blob, name) { super(view.app); this.view = view; this.blob = blob; this.name = name; }
+  onOpen() {
+    const { contentEl } = this;
+    this.titleEl.setText(t('recTitle'));
+    this.url = URL.createObjectURL(this.blob);
+    const vid = contentEl.createEl('video', { cls: 'cg-rec-preview', attr: { controls: '', autoplay: '', muted: '', loop: '' } });
+    vid.src = this.url;
+    let name = this.name;
+    new Setting(contentEl).setName(t('recName')).addText((tx) => tx.setValue(name).onChange((v) => { name = v; }));
+    const fix = () => { const ext = this.name.slice(this.name.lastIndexOf('.')); return name.endsWith(ext) ? name : name + ext; };
+    new Setting(contentEl)
+      .addButton((b) => b.setButtonText(t('recDiscard')).setWarning().onClick(() => this.close()))
+      .addButton((b) => b.setButtonText(t('recToVault')).onClick(async () => { await this.view.saveToVault(this.blob, fix(), true); this.close(); }))
+      .addButton((b) => b.setButtonText(t('recSaveAs')).setCta().onClick(() => {
+        const a = document.createElement('a'); a.href = this.url; a.download = fix(); document.body.appendChild(a); a.click(); a.remove();
+        window.setTimeout(() => this.close(), 1500);
+      }));
+  }
+  onClose() { this.contentEl.empty(); if (this.url) window.setTimeout(() => URL.revokeObjectURL(this.url), 3000); }
 }
