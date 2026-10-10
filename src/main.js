@@ -7,7 +7,7 @@ import { t } from './i18n';
 
 export const SHAPES = ['kreis', 'ring', 'stern', 'raute', 'quadrat'];
 const STYLE_DEFAULTS = { shapeSize: 1, shapeGroup: 0.4, hubPull: 0.5, center: 2, repel: 10, link: 1, dist: 32, range: 250, nodeSize: 1, degSize: 1, glow: 1, line: 1,
-  font: 4, fontGrow: 1.45, boldFrom: 15, labelFrom: 4, maxLabels: 150, dimOthers: 0.04, taper: 1, taperLen: 1, lineGlow: 0.6, nodeBright: 1, nodeOpacity: 1, shStern: 2, shRaute: 0, shQuadrat: 0, shRing: 0 };
+  font: 4, fontGrow: 1.45, boldFrom: 15, labelFrom: 4, maxLabels: 150, dimOthers: 0.04, taper: 0.4, taperLen: 0.6, lineGlow: 0.25, nodeBright: 1, nodeOpacity: 1, shStern: 2, shRaute: 0, shQuadrat: 0, shRing: 0 };
 const DEFAULTS = {
   layout: '3d', shape: 'free', background: 'space', colorBy: 'obsidian', filters: true, orphans: false, labels: true, rotate: true,
   clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], folderLinks: 'hidden', rankBy: 'auto', recSave: 'ask', focusCamera: true, staleDays: 90, shapeDefault: 'kreis', hubStars: true, folderShapes: {}, noteShapes: {}, noteWeights: {}, claudeLive: true, galaxies: true, views: [], style: Object.assign({}, STYLE_DEFAULTS),
@@ -148,9 +148,17 @@ export default class CortexGraphPlugin extends Plugin {
     this.settings.hiddenFolders = Array.isArray(d.hiddenFolders) ? d.hiddenFolders.slice() : [];
     this.settings.views = Array.isArray(d.views) ? d.views.slice() : [];
     this.settings.style = Object.assign({}, STYLE_DEFAULTS, d.style || {});
+    if ((d.styleRev || 0) < 2 && d.style) { // 3.0.1 rescaled glow (x2.5) and line width (x0.6)
+      const st = this.settings.style;
+      if (st.glow != null) st.glow = Math.round(Math.min(2.5, st.glow / 2.5) * 100) / 100;
+      if (st.line != null) st.line = Math.round(Math.max(0.3, st.line / 0.6) * 10) / 10;
+    }
+    const migrate = (d.styleRev || 0) < 2 && !!d.style;
+    this.settings.styleRev = 2;
     this.settings.keys = {};
     for (const a of KEY_ACTIONS) this.settings.keys[a] = (d.keys && Array.isArray(d.keys[a]) ? d.keys[a] : DEFAULT_KEYS[a]).slice(0, 2);
     this.settings.mouse = Object.assign({}, DEFAULT_MOUSE, d.mouse || {});
+    if (migrate) await this.saveData(this.settings);
   }
   async saveSettings() { await this.saveData(this.settings); }
   resetStyle() {

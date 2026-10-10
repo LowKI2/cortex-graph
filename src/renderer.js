@@ -14,7 +14,7 @@ export const LABEL_FONTS = {
   round: "ui-rounded, 'SF Pro Rounded', 'Segoe UI Variable Display', 'Nunito', sans-serif",
 };
 const cssVarFont = (v) => { try { return getComputedStyle(document.body).getPropertyValue(v).trim() || 'system-ui, sans-serif'; } catch { return 'system-ui, sans-serif'; } };
-const STYLE_DEFAULT = { nodeSize: 1, degSize: 1, glow: 1, line: 1, taper: 1, taperLen: 1, lineGlow: 0.6, nodeBright: 1, nodeOpacity: 1, font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, rotate: true };
+const STYLE_DEFAULT = { nodeSize: 1, degSize: 1, glow: 1, line: 1, taper: 0.4, taperLen: 0.6, lineGlow: 0.25, nodeBright: 1, nodeOpacity: 1, font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, rotate: true };
 
 function hexToRgb(h) {
   const v = parseInt(String(h).replace('#', '').slice(0, 6), 16) || 0;
@@ -102,7 +102,8 @@ export class GraphRenderer {
             float L = min(pxB * 0.8 * uLen * zB, segLen * 0.48);
             along = segLen - aU * L; taper = pxB * 0.06 * uTaper * zB * pow(1.0 - aU, 1.7);
           } else along = segLen * 0.5;
-          float hw = max(0.6, 0.5 * uLineW + taper);
+          float hw = max(0.5, 0.5 * uLineW + taper);
+          vAlpha *= clamp((0.5 * uLineW + taper) / 0.5, 0.25, 1.0);   // hairlines fade instead of getting wider
           if (GLOW > 0.5) hw = hw * 1.6 + uGlowW;
           vec2 sP = sA + d * along + nrm * aSide * hw;
           vec4 cP = mix(cA, cB, along / segLen);
@@ -170,7 +171,7 @@ export class GraphRenderer {
           if (d > 1.0) discard;
           float pulse = 1.0 + vHeat * 0.8 * (0.5 + 0.5 * sin(uTime * 2.6));
           float halo = pow(1.0 - d, 2.2) * pulse;
-          gl_FragColor = vec4(vColor * halo * 0.9 * uGlow * uSizeK, vAlpha);
+          gl_FragColor = vec4(vColor * halo * 2.25 * uGlow * uSizeK, vAlpha);
         }`,
       transparent: true, depthWrite: false, blending: AdditiveBlending,
     });
@@ -505,7 +506,7 @@ export class GraphRenderer {
     for (let k = 0; k < this.edges.length; k++) {
       const [a, b] = this.edges[k];
       const sa = this.nodes[a].anchor ? 0 : sz[a], sb = this.nodes[b].anchor ? 0 : sz[b];
-      const al = Math.min(1, lA[2 * k] * 2.6);
+      const al = Math.min(1, lA[2 * k] * 1.5);
       for (let i = 0; i < NS; i++) {
         const t = i < half ? 0 : i > half ? 1 : 0.5;
         const r = lc[6 * k] * (1 - t) + lc[6 * k + 3] * t, g = lc[6 * k + 1] * (1 - t) + lc[6 * k + 4] * t, bl = lc[6 * k + 2] * (1 - t) + lc[6 * k + 5] * t;
@@ -608,7 +609,7 @@ export class GraphRenderer {
     this.nodeMat.uniforms.uBright.value = st.nodeBright != null ? st.nodeBright : 1;
     this.nodeMat.uniforms.uOpacity.value = st.nodeOpacity != null ? st.nodeOpacity : 1;
     for (const m of [this.edgeBaseMat, this.edgeGlowMat]) {
-      m.uniforms.uLineW.value = (st.line != null ? st.line : 1) * this.renderer.getPixelRatio();
+      m.uniforms.uLineW.value = (st.line != null ? st.line : 1) * 0.6 * this.renderer.getPixelRatio();
       m.uniforms.uTaper.value = st.taper || 0;
       m.uniforms.uLen.value = st.taperLen != null ? st.taperLen : 1;
     }
