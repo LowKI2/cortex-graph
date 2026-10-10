@@ -109,6 +109,22 @@ export function buildGraph(notes, o) {
 
   const stats = { orphan: 0, deadEnd: 0, unresolved: 0 };
   for (const nd of nodes) if (nd.kind) stats[nd.kind]++;
+  // filtered-out notes stay in the layout as invisible nodes, so hovering them in the explorer can show them in place
+  if (o.keepHidden && o.focus == null && !o.problems) {
+    const at = new Map(nodes.map((nd, k) => [nd.note.i, k]));
+    for (const n of notes) if (!at.has(n.i)) { at.set(n.i, nodes.length); nodes.push({ key: n.path, note: n, ghost: false, hidden: true, label: n.name, deg: 0, kind: kindOf(n) }); }
+    const pairs2 = new Set(outEdges.map(([a, b]) => (a < b ? a + ':' + b : b + ':' + a)));
+    for (const nd of nodes) {
+      if (!nd.hidden) continue;
+      const a = at.get(nd.note.i);
+      for (const j of [...nd.note.out, ...nd.note.back]) {
+        const b = at.get(j); if (b == null || b === a) continue;
+        const key = a < b ? a + ':' + b : b + ':' + a;
+        if (pairs2.has(key)) continue;
+        pairs2.add(key); outEdges.push([a, b]); nodes[a].deg++; nodes[b].deg++;
+      }
+    }
+  }
   if (o.problems) {
     const ghosts = new Map();
     nodes.forEach((nd, k) => {

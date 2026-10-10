@@ -143,7 +143,7 @@ export class CortexGraphView extends ItemView {
       focus = n ? n.i : null;
       if (focus == null && !force && this.G.nodes.length) return; // keep last local graph
     } else if (this.focusPath && byPath.has(this.focusPath)) focus = byPath.get(this.focusPath).i;
-    const G = buildGraph(notes, { focus, depth: this.depth, orphans: s.orphans, filter: s.filters && cfg.has ? cfg : null, problems: this.problems });
+    const G = buildGraph(notes, { focus, depth: this.depth, orphans: s.orphans, filter: s.filters && cfg.has ? cfg : null, problems: this.problems, keepHidden: true });
     const fw = s.folderWeights || {};
     for (const nd of G.nodes) nd.w = nd.note ? deepestFolderValue(fw, nd.note.path) || 1 : 1;
     const sig = signature(G) + '|' + this.mode + '|' + s.layout;
@@ -256,8 +256,9 @@ export class CortexGraphView extends ItemView {
 
   updateInfo() {
     const G = this.G;
-    const real = G.nodes.filter((nd) => !nd.ghost).length;
-    this.info.setText(real + ' ' + t('notes') + ' · ' + G.edges.length + ' ' + t('links'));
+    const real = G.nodes.filter((nd) => !nd.ghost && !nd.hidden).length;
+    const links = G.edges.filter(([a, b]) => !G.nodes[a].hidden && !G.nodes[b].hidden).length;
+    this.info.setText(real + ' ' + t('notes') + ' · ' + links + ' ' + t('links'));
   }
 
   highlightPath(path, folder) {
@@ -356,7 +357,7 @@ export class CortexGraphView extends ItemView {
 
   flyTo(path) {
     const k = this.G.idx.get(path);
-    if (k == null) { new Notice(t('notInGraph')); return; }
+    if (k == null || this.G.nodes[k].hidden) { new Notice(t('notInGraph')); return; }
     this.select(k, false); this.R.focusNode(k);
   }
 
@@ -392,7 +393,7 @@ export class CortexGraphView extends ItemView {
       hits = [];
       if (q && this.notes) {
         const fz = prepareFuzzySearch(q);
-        for (const n of this.notes) { if (!this.G.idx.has(n.path)) continue; const r = fz(n.name); if (r) hits.push({ n, s: r.score }); }
+        for (const n of this.notes) { const gk = this.G.idx.get(n.path); if (gk == null || this.G.nodes[gk].hidden) continue; const r = fz(n.name); if (r) hits.push({ n, s: r.score }); }
         hits.sort((a, b) => b.s - a.s); hits = hits.slice(0, 8);
       }
       hi = 0; render();

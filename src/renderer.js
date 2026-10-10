@@ -129,7 +129,7 @@ export class GraphRenderer {
   setGraph(nodes, edges, adj) {
     this.nodes = nodes; this.edges = edges; this.adj = adj; this.sel = -1; this.dragK = -1; this.hover = -1;
     this.pathSet = null; this.pathEdges = null;
-    this.maxDeg = Math.max(1, ...nodes.map((nd) => nd.deg * (nd.w || 1)));
+    this.maxDeg = Math.max(1, ...nodes.filter((nd) => !nd.hidden).map((nd) => nd.deg * (nd.w || 1)));
     if (this.points) { this.root.remove(this.points); this.points.geometry.dispose(); }
     if (this.lines) { this.root.remove(this.lines); this.lines.geometry.dispose(); }
     const n = nodes.length;
@@ -236,6 +236,7 @@ export class GraphRenderer {
       if (bright && !bright.has(k)) a = Math.min(a, 0.22);
       else if (bright && this.colorOverride && this.colorOverride[k]) { s = Math.max(s, 26) * 1.7; }
       if (this.hl) { if (this.hl.has(k)) { s = Math.max(s, 22) * 1.7; c = mix(c, [1, 1, 1], 0.35); a = 1; } else a = this.light ? 0.08 : 0.04; }
+      if (this.nodes[k].hidden && !(this.hl && this.hl.has(k))) { a = 0; s = 0; }
       if (k === this.hover) s *= 1.35;
       al[k] = a; sz[k] = s; col[3 * k] = c[0]; col[3 * k + 1] = c[1]; col[3 * k + 2] = c[2];
     }
@@ -255,7 +256,9 @@ export class GraphRenderer {
         const h2 = path ? PATH_RGB : (this.light ? [0.35, 0.25, 0.8] : [0.75, 0.6, 1]);
         lc.set(h1, 6 * k); lc.set(h2, 6 * k + 3);
       } else { lc.set(ca, 6 * k); lc.set(cb, 6 * k + 3); }
-      if (this.hl) alpha = this.hl.has(a) && this.hl.has(b) ? 0.6 : (this.hl.has(a) || this.hl.has(b) ? 0.12 : 0.01);
+      if (this.hl) alpha = this.hl.has(a) && this.hl.has(b) ? 0.6 : (this.hl.has(a) || this.hl.has(b) ? 0.25 : 0.01);
+      const vis = (j) => !this.nodes[j].hidden || (this.hl && this.hl.has(j));
+      if (!vis(a) || !vis(b)) alpha = 0;
       lA[2 * k] = lA[2 * k + 1] = Math.min(1, alpha * w);
     }
     la.color.needsUpdate = true; la.alpha.needsUpdate = true;
@@ -283,7 +286,7 @@ export class GraphRenderer {
     return Math.max(60, Math.min(9000, r / Math.sin(Math.min(v, h) / 2) * 1.04));
   }
   fitTo(list, instant) {
-    const ks = list || this.nodes.map((_, k) => k);
+    const ks = list || this.nodes.map((_, k) => k).filter((k) => !this.nodes[k].hidden);
     if (!ks.length) return;
     let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
     for (const k of ks) {
@@ -338,11 +341,11 @@ export class GraphRenderer {
     let want = [];
     if (this.showLabels && nodes.length) {
       if (this.pathSet) want = [...this.pathSet];
-      else if (sel >= 0) want = [sel, ...this.adj[sel]].slice(0, Math.max(28, st.maxLabels));
+      else if (sel >= 0) want = [sel, ...this.adj[sel].filter((j) => !nodes[j].hidden)].slice(0, Math.max(28, st.maxLabels));
       else if (this.dimSet) want = [...this.dimSet].sort((a, b) => rk(nodes[b]) - rk(nodes[a])).slice(0, Math.max(40, st.maxLabels));
       else {
         const idx = [];
-        for (let k = 0; k < nodes.length; k++) if (rk(nodes[k]) >= st.labelFrom) idx.push(k);
+        for (let k = 0; k < nodes.length; k++) if (!nodes[k].hidden && rk(nodes[k]) >= st.labelFrom) idx.push(k);
         idx.sort((a, b) => rk(nodes[b]) - rk(nodes[a]));
         want = idx.slice(0, st.maxLabels);
       }
@@ -483,6 +486,7 @@ export class GraphRenderer {
   pick(sx, sy) {
     let best = -1, bd = Infinity;
     for (let k = 0; k < this.nodes.length; k++) {
+      if (this.nodes[k].hidden && !(this.hl && this.hl.has(k))) continue;
       const p = this.project(k);
       if (p.z > 1 || p.z < -1) continue;
       const d = (p.x - sx) ** 2 + (p.y - sy) ** 2;
