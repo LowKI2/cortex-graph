@@ -21,7 +21,7 @@ const TL_RATES = [[1000, 'tlRateSec'], [60000, 'tlRateMin'], [3600000, 'tlRateHo
 export const KEY_ACTIONS = ['zin', 'zout', 'up', 'down', 'left', 'right', 'rl', 'rr', 'tu', 'td', 'fit', 'names', 'search'];
 export const DEFAULT_KEYS = { zin: ['+', '='], zout: ['-', ''], up: ['ArrowUp', 'w'], down: ['ArrowDown', 's'], left: ['ArrowLeft', 'a'], right: ['ArrowRight', 'd'],
   rl: ['q', ''], rr: ['e', ''], tu: ['PageUp', 'r'], td: ['PageDown', 'v'], fit: ['0', 'f'], names: ['n', ''], search: ['/', ''] };
-export const DEFAULT_MOUSE = { left: 'rotate', right: 'pan', middle: 'pan', shift: 'link', invert: false, rotSpeed: 1 };
+export const DEFAULT_MOUSE = { left: 'rotate', right: 'pan', middle: 'pan', shift: 'link', invert: false, rotSpeed: 1, rotPause: 1 };
 const KEY_NAMES = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', ' ': 'Space', PageUp: 'PgUp', PageDown: 'PgDn', Home: 'Pos1', End: 'Ende', Insert: 'Einfg' };
 const normKey = (k) => (k && k.length === 1 ? k.toLowerCase() : k);
 const keyLabel = (k) => (!k ? '·' : KEY_NAMES[k] || (k.length === 1 ? k.toUpperCase() : k));
@@ -1156,6 +1156,13 @@ export class CortexGraphView extends ItemView {
     const rg = sp.createEl('input', { type: 'range', attr: { min: 0.2, max: 3, step: 0.05 } });
     rg.value = String(ps.mouse.rotSpeed);
     rg.oninput = () => { ps.mouse.rotSpeed = Number(rg.value); out.setText(fmt(ps.mouse.rotSpeed, 0.05)); save(); };
+    const pz = box.createEl('label', { cls: 'cg-row' });
+    const pt = pz.createSpan({ cls: 'cg-row-top' });
+    pt.createSpan({ text: t('mouseRotPause') });
+    const po = pt.createEl('b', { text: ps.mouse.rotPause + ' s' });
+    const pr = pz.createEl('input', { type: 'range', attr: { min: 0, max: 10, step: 0.5 } });
+    pr.value = String(ps.mouse.rotPause);
+    pr.oninput = () => { ps.mouse.rotPause = Number(pr.value); po.setText(ps.mouse.rotPause + ' s'); save(); };
     box.createDiv({ cls: 'cg-ctrl-hint', text: t('ctrlHintMouse') });
   }
 

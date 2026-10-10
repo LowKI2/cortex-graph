@@ -673,7 +673,7 @@ export class GraphRenderer {
     this.raf = window.requestAnimationFrame(() => this.frame());
     if (!this.canvas.isConnected || this.canvas.offsetParent === null || document.hidden) return;
     const now = performance.now(), dt = Math.min(0.05, (now - this.clockT) / 1000); this.clockT = now;
-    if (this.style.rotate && Date.now() - this.lastInteract > 4000 && this.dragK < 0 && this.hover < 0) this.yaw += dt * 0.06;
+    if (this.style.rotate && Date.now() - this.lastInteract > 1000 * ((this.mouse && this.mouse.rotPause != null) ? this.mouse.rotPause : 1) && this.dragK < 0 && this.hover < 0) this.yaw += dt * 0.06;
     this.target.lerp(this.targetGoal, Math.min(1, dt * 4));
     this.dist += (this.distGoal - this.dist) * Math.min(1, dt * 4);
     const c = this.camera, t = this.target;
