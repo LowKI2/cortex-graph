@@ -99,26 +99,29 @@ export class GraphRenderer {
 
   glowMaterial(coreAmt, fog) {
     return new ShaderMaterial({
-      uniforms: { uScale: { value: 300 }, uCore: { value: coreAmt }, uMin: { value: fog ? 0.5 : 0.0 }, uGlow: { value: 1.0 }, uRad: { value: 1.0 }, uSizeK: { value: 1.0 }, uBright: { value: 1.0 }, uTime: { value: 0 }, uLight: { value: 0 } },
+      uniforms: { uScale: { value: 300 }, uCore: { value: coreAmt }, uMin: { value: fog ? 0.5 : 0.0 }, uGlow: { value: 1.0 }, uRad: { value: 1.0 }, uPx: { value: 1.0 }, uSizeK: { value: 1.0 }, uBright: { value: 1.0 }, uTime: { value: 0 }, uLight: { value: 0 } },
       vertexShader: `
         attribute float size; attribute float alpha; attribute vec3 color; attribute float heat; attribute float shape;
-        varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape;
-        uniform float uScale; uniform float uMin; uniform float uRad;
+        varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape; varying float vK;
+        uniform float uScale; uniform float uMin; uniform float uRad; uniform float uPx;
         void main() {
           vColor = color; vAlpha = alpha; vHeat = heat; vShape = shape;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          float ps = size * uScale / -mv.z;
-          gl_PointSize = clamp(max(ps, size * uMin) * uRad, 2.0, 400.0);
+          float base = max(size * uScale / -mv.z, size * uMin);
+          // glow radius: scales with the node and gets a fixed extra so small/distant nodes visibly grow too
+          float gs = clamp(max(base * uRad, base + 14.0 * uPx * (uRad - 1.0)), 2.0, 400.0);
+          gl_PointSize = gs;
+          vK = gs / max(base, 0.001);
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: `
-        varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape;
+        varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape; varying float vK;
         uniform float uCore; uniform float uGlow; uniform float uRad; uniform float uSizeK; uniform float uBright; uniform float uTime; uniform float uLight;
         void main() {
           vec2 cs = gl_PointCoord - 0.5;
           float dh = length(cs) * 2.0;           // 0..1 across the whole sprite (glow)
           if (dh > 1.0) discard;
-          vec2 c = cs * uRad;                    // the node itself keeps its size when the glow radius changes
+          vec2 c = cs * vK;                      // the node itself keeps its size when the glow radius changes
           float d = length(c) * 2.0;
           float pulse = 1.0 + vHeat * 0.55 * (0.5 + 0.5 * sin(uTime * 2.6));
           // node shapes: 0 circle, 1 ring, 2 star, 3 diamond, 4 square
@@ -127,7 +130,7 @@ export class GraphRenderer {
           else if (vShape > 2.5) dc = (abs(c.x) + abs(c.y)) * 2.2;
           else if (vShape > 1.5) { float an = atan(c.y, c.x); dc = d / (0.45 + 0.55 * pow(abs(cos(2.5 * an)), 4.0)) * 0.75; }
           float core = vShape > 0.5 && vShape < 1.5 ? smoothstep(0.1, 0.0, abs(d - 0.3)) : smoothstep(0.32, 0.0, dc);
-          float halo = pow(1.0 - dh, 2.6) * pulse;
+          float halo = pow(1.0 - dh, 2.2) * pulse;
           if (uLight > 0.5) {
             float disc = vShape > 0.5 && vShape < 1.5 ? smoothstep(0.14, 0.06, abs(d - 0.45)) : smoothstep(0.62, 0.5, vShape > 0.5 ? dc * 1.6 : d);
             float a = max(disc, halo * 0.45 * uGlow);
@@ -455,6 +458,7 @@ export class GraphRenderer {
     for (const c of ['glow', 'shadow', 'pill', 'none']) this.labelLayer.toggleClass('cg-ls-' + c, (this.style.labelStyle || 'glow') === c);
     const st = this.style, u = this.nodeMat.uniforms;
     u.uRad.value = Math.max(0.4, st.glow != null ? st.glow : 1);   // Leuchten = radius of the glow, not its strength
+    u.uPx.value = this.renderer.getPixelRatio();
     u.uSizeK.value = 1 / Math.sqrt(Math.max(1, st.nodeSize));
     u.uBright.value = st.nodeBright != null ? st.nodeBright : 1;  // Helligkeit = intensity
     this.baseMat.uniforms.uBright.value = u.uBright.value;
