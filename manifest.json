@@ -1,7 +1,7 @@
 {
   "id": "cortex-graph",
   "name": "Cortex Graph",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "minAppVersion": "1.4.0",
   "description": "3D graph with glowing nodes. Live updates, activity heat, shortest paths, fly-to search, link health check and touch controls on mobile.",
   "author": "BZi Studio",

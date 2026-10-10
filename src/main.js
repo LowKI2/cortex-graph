@@ -5,7 +5,7 @@ import { CortexGraphView, VIEW_TYPE } from './view';
 import { t } from './i18n';
 
 const STYLE_DEFAULTS = { center: 2, repel: 10, link: 1, dist: 32, range: 250, nodeSize: 1, degSize: 1, glow: 1, line: 1,
-  font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30 };
+  font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, dimOthers: 0.04 };
 const DEFAULTS = {
   layout: '3d', background: 'space', colorBy: 'obsidian', filters: true, orphans: false, labels: true, rotate: true,
   clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, style: Object.assign({}, STYLE_DEFAULTS),

@@ -6,11 +6,11 @@ import SIM_SRC from './sim.worker.js';
 
 export const VIEW_TYPE = 'cortex-graph-view';
 
-export const STYLE_KEYS = ['center', 'repel', 'link', 'dist', 'range', 'nodeSize', 'degSize', 'glow', 'line', 'font', 'fontGrow', 'boldFrom', 'labelFrom', 'maxLabels'];
+export const STYLE_KEYS = ['center', 'repel', 'link', 'dist', 'range', 'nodeSize', 'degSize', 'glow', 'line', 'font', 'fontGrow', 'boldFrom', 'labelFrom', 'maxLabels', 'dimOthers'];
 const FORCE_KEYS = new Set(['center', 'repel', 'link', 'dist', 'range']);
 const PANEL = [
   ['secForces'], ['center', 0, 5, 0.05], ['range', 60, 2000, 10], ['repel', 0, 20, 0.1], ['link', 0, 1, 0.01], ['dist', 8, 150, 1],
-  ['secNodes'], ['nodeSize', 0.3, 3, 0.05], ['degSize', 0, 3, 0.05], ['glow', 0.2, 2.5, 0.05], ['line', 0.2, 3, 0.05],
+  ['secNodes'], ['nodeSize', 0.3, 3, 0.05], ['dimOthers', 0, 0.6, 0.01], ['degSize', 0, 3, 0.05], ['glow', 0.2, 2.5, 0.05], ['line', 0.2, 3, 0.05],
   ['secLabels'], ['font', 8, 22, 1], ['fontGrow', 0, 2, 0.05], ['boldFrom', 1, 60, 1], ['labelFrom', 0, 60, 1], ['maxLabels', 0, 200, 5],
 ];
 const KEYNAV = { '+': 'zin', '=': 'zin', '-': 'zout', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
@@ -84,19 +84,33 @@ export class CortexGraphView extends ItemView {
     this.registerInterval(window.setInterval(() => { if (this.activity) this.applyHeat(); }, 60000));
     this.registerDomEvent(root, 'keydown', (e) => this.onKey(e));
     // hovering a file or folder in the file explorer lights up its nodes
+    // clicking a folder open keeps it lit until it is closed again
     let hlPath = null;
+    this.pinned = null;
     const hlFrom = (el) => {
       const it = el instanceof Element ? el.closest('.nav-file-title[data-path], .nav-folder-title[data-path]') : null;
       return it && !this.contentEl.contains(it) ? it : null;
     };
+    const showPinned = () => { if (this.pinned) this.highlightPath(this.pinned, true); else this.highlightPath(null); };
     this.registerDomEvent(document, 'mouseover', (e) => {
       const it = hlFrom(e.target);
       const p = it ? it.getAttribute('data-path') : null;
       if (p === hlPath) return;
       hlPath = p;
-      this.highlightPath(p, it ? it.hasClass('nav-folder-title') : false);
+      if (p) this.highlightPath(p, it.hasClass('nav-folder-title')); else showPinned();
     });
-    this.registerDomEvent(document, 'mouseleave', () => { hlPath = null; this.highlightPath(null); });
+    this.registerDomEvent(document, 'mouseleave', () => { hlPath = null; showPinned(); });
+    this.registerDomEvent(document, 'click', (e) => {
+      const it = hlFrom(e.target);
+      if (!it || !it.hasClass('nav-folder-title')) return;
+      const p = it.getAttribute('data-path');
+      window.setTimeout(() => {
+        const open = it.parentElement && !it.parentElement.hasClass('is-collapsed');
+        if (open) this.pinned = p;
+        else if (this.pinned && (this.pinned === p || this.pinned.startsWith(p + '/'))) this.pinned = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : null;
+        if (!hlPath || hlPath === p) { if (open) this.highlightPath(p, true); else if (hlPath === p) this.highlightPath(p, true); else showPinned(); }
+      }, 60);
+    }, true);
     root.tabIndex = 0;
 
     this.updateToolbar();

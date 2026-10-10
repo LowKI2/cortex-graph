@@ -235,7 +235,7 @@ export class GraphRenderer {
       else if (nb) { if (!nb.has(k)) a = dimA; s *= k === sel ? 1.8 : (nb.has(k) ? 1.25 : 1); }
       if (bright && !bright.has(k)) a = Math.min(a, 0.22);
       else if (bright && this.colorOverride && this.colorOverride[k]) { s = Math.max(s, 26) * 1.7; }
-      if (this.hl) { if (this.hl.has(k)) { s = Math.max(s, 22) * 1.7; c = mix(c, [1, 1, 1], 0.35); a = 1; } else a = this.light ? 0.08 : 0.04; }
+      if (this.hl) { if (this.hl.has(k)) { s = Math.max(s, 22) * 1.7; c = mix(c, [1, 1, 1], 0.35); a = 1; } else a = this.style.dimOthers != null ? this.style.dimOthers : 0.04; }
       if (this.nodes[k].hidden && !(this.hl && this.hl.has(k))) { a = 0; s = 0; }
       if (k === this.hover) s *= 1.35;
       al[k] = a; sz[k] = s; col[3 * k] = c[0]; col[3 * k + 1] = c[1]; col[3 * k + 2] = c[2];
@@ -256,7 +256,7 @@ export class GraphRenderer {
         const h2 = path ? PATH_RGB : (this.light ? [0.35, 0.25, 0.8] : [0.75, 0.6, 1]);
         lc.set(h1, 6 * k); lc.set(h2, 6 * k + 3);
       } else { lc.set(ca, 6 * k); lc.set(cb, 6 * k + 3); }
-      if (this.hl) alpha = this.hl.has(a) && this.hl.has(b) ? 0.6 : (this.hl.has(a) || this.hl.has(b) ? 0.25 : 0.01);
+      if (this.hl) alpha = this.hl.has(a) && this.hl.has(b) ? 0.6 : (this.hl.has(a) || this.hl.has(b) ? 0.25 : 0.01 + (this.style.dimOthers || 0) * 0.3);
       const vis = (j) => !this.nodes[j].hidden || (this.hl && this.hl.has(j));
       if (!vis(a) || !vis(b)) alpha = 0;
       lA[2 * k] = lA[2 * k + 1] = Math.min(1, alpha * w);
