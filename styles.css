@@ -162,3 +162,12 @@
 .cg-time-pos { width: 100%; }
 .cg-time-pos .cg-time-label b { font-size: var(--font-ui-small); }
 .cg-time { width: min(720px, calc(100% - 140px)); }
+/* time bar grows with its content, wraps instead of overflowing */
+.cg-time { width: max-content; min-width: min(720px, calc(100% - 120px)); max-width: calc(100% - 120px); box-sizing: border-box; }
+.cg-time-row:first-child { flex-wrap: wrap; row-gap: 6px; }
+.cg-time-row:first-child > * { flex: 0 0 auto; }
+.cg-time-count { margin-left: auto; }
+.cg-root.is-mobile .cg-time { width: auto; min-width: 0; max-width: none; }
+.cg-time { position: absolute; padding-right: 40px; }
+.cg-time-close.clickable-icon { position: absolute; top: 8px; right: 6px; width: 28px; height: 28px; }
+.cg-time-row:first-child select { width: auto; max-width: 150px; padding-right: 26px; }

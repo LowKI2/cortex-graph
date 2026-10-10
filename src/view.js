@@ -449,7 +449,7 @@ export class CortexGraphView extends ItemView {
     this.recBtn = row1.createEl('button', { cls: 'cg-time-rec clickable-icon', attr: { 'aria-label': t('tlRecord') } }); setIcon(this.recBtn, 'circle');
     this.recBtn.onclick = () => (this.R.rec ? this.finishRecording() : this.startRecording());
     this.tlCount = row1.createSpan({ cls: 'cg-time-count' });
-    const x = row1.createEl('button', { cls: 'clickable-icon', attr: { 'aria-label': t('close') } }); setIcon(x, 'x');
+    const x = bar.createEl('button', { cls: 'clickable-icon cg-time-close', attr: { 'aria-label': t('close') } }); setIcon(x, 'x');
     x.onclick = () => { if (this.R.rec) this.finishRecording(); this.toggleTimeline(false); };
     // left: range (From / To), right: timeline with the playhead
     const row2 = bar.createDiv({ cls: 'cg-time-row cg-time-row2' });
