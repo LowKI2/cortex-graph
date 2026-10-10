@@ -2,7 +2,7 @@
 import {
   WebGLRenderer, Scene, FogExp2, PerspectiveCamera, Group, BufferGeometry, BufferAttribute, Points, LineSegments,
   ShaderMaterial, LineDashedMaterial, AdditiveBlending, NormalBlending, Vector2, Vector3, Raycaster, Plane, Color,
-  Sprite, SpriteMaterial, CanvasTexture, Mesh, DoubleSide,
+  Sprite, SpriteMaterial, CanvasTexture, Mesh, DoubleSide, CustomBlending, OneFactor, OneMinusSrcAlphaFactor,
 } from 'three';
 
 const FLARE_SEG = 4;
@@ -15,7 +15,7 @@ export const LABEL_FONTS = {
   round: "ui-rounded, 'SF Pro Rounded', 'Segoe UI Variable Display', 'Nunito', sans-serif",
 };
 const cssVarFont = (v) => { try { return getComputedStyle(document.body).getPropertyValue(v).trim() || 'system-ui, sans-serif'; } catch { return 'system-ui, sans-serif'; } };
-const STYLE_DEFAULT = { nodeSize: 1, degSize: 1, glow: 1, line: 1, taper: 1, taperBright: 0.6, nodeBright: 1, font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, rotate: true };
+const STYLE_DEFAULT = { nodeSize: 1, degSize: 1, glow: 1, line: 1, taper: 1, taperBright: 0.6, nodeBright: 1, nodeOpacity: 1, font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, rotate: true };
 
 function hexToRgb(h) {
   const v = parseInt(String(h).replace('#', '').slice(0, 6), 16) || 0;
@@ -95,7 +95,7 @@ export class GraphRenderer {
 
   glowMaterial(coreAmt, fog) {
     return new ShaderMaterial({
-      uniforms: { uScale: { value: 300 }, uCore: { value: coreAmt }, uMin: { value: fog ? 0.5 : 0.0 }, uGlow: { value: 1.0 }, uSizeK: { value: 1.0 }, uBright: { value: 1.0 }, uTime: { value: 0 }, uLight: { value: 0 } },
+      uniforms: { uScale: { value: 300 }, uCore: { value: coreAmt }, uMin: { value: fog ? 0.5 : 0.0 }, uGlow: { value: 1.0 }, uSizeK: { value: 1.0 }, uBright: { value: 1.0 }, uOpacity: { value: -1.0 }, uTime: { value: 0 }, uLight: { value: 0 } },
       vertexShader: `
         attribute float size; attribute float alpha; attribute vec3 color; attribute float heat; attribute float shape;
         varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape;
@@ -109,7 +109,7 @@ export class GraphRenderer {
         }`,
       fragmentShader: `
         varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape;
-        uniform float uCore; uniform float uGlow; uniform float uSizeK; uniform float uBright; uniform float uTime; uniform float uLight;
+        uniform float uCore; uniform float uGlow; uniform float uSizeK; uniform float uBright; uniform float uOpacity; uniform float uTime; uniform float uLight;
         void main() {
           vec2 c = gl_PointCoord - 0.5;
           float d = length(c) * 2.0;
@@ -125,13 +125,16 @@ export class GraphRenderer {
           if (uLight > 0.5) {
             float disc = vShape > 0.5 && vShape < 1.5 ? smoothstep(0.14, 0.06, abs(d - 0.45)) : smoothstep(0.62, 0.5, vShape > 0.5 ? dc * 1.6 : d);
             float a = max(disc, halo * 0.45 * uGlow);
-            gl_FragColor = vec4(vColor * (0.75 + 0.25 * core), a * vAlpha);
+            gl_FragColor = vec4(vColor * (0.75 + 0.25 * core) * min(1.0, uBright + 0.25), a * vAlpha * (uOpacity < 0.0 ? 1.0 : 0.25 + 0.75 * uOpacity));
             return;
           }
           // bigger nodes overlap more under additive blending – keep their brightness constant
           float hk = uGlow * uSizeK;
           vec3 col = vColor * (halo * 0.95 * hk + core * 1.1 * sqrt(uSizeK)) + vec3(1.0) * core * uCore * uSizeK;
-          gl_FragColor = vec4(col * uBright, clamp(halo * 0.9 * hk + core, 0.0, 1.0) * vAlpha * min(1.0, uBright));
+          float a = clamp(halo * 0.9 * hk + core, 0.0, 1.0) * vAlpha;
+          if (uOpacity < 0.0) { gl_FragColor = vec4(col * uBright, a); return; }
+          // premultiplied: the glow adds light, the core covers what lies behind it (opacity slider)
+          gl_FragColor = vec4(col * uBright * a, clamp(core * 1.4, 0.0, 1.0) * vAlpha * uOpacity);
         }`,
       transparent: true, depthWrite: false, blending: AdditiveBlending,
     });
@@ -166,7 +169,9 @@ export class GraphRenderer {
     this.scene.fog = new FogExp2(new Color(bg).getHex(), space ? 0.0009 : 0.0004);
     this.stars.visible = space;
     const blend = this.light ? NormalBlending : AdditiveBlending;
-    this.nodeMat.blending = blend; this.lineMat.blending = blend; this.flareMat.blending = blend; this.flareMat.needsUpdate = true;
+    this.nodeMat.blending = this.light ? NormalBlending : CustomBlending;
+    this.nodeMat.blendSrc = OneFactor; this.nodeMat.blendDst = OneMinusSrcAlphaFactor;
+    this.lineMat.blending = blend; this.flareMat.blending = blend; this.flareMat.needsUpdate = true;
     this.nodeMat.uniforms.uLight.value = this.light ? 1 : 0;
     this.nodeMat.needsUpdate = true; this.lineMat.needsUpdate = true;
     if (this.points) this.paint();
@@ -504,6 +509,7 @@ export class GraphRenderer {
     this.nodeMat.uniforms.uGlow.value = this.style.glow;
     this.nodeMat.uniforms.uSizeK.value = 1 / Math.max(1, this.style.nodeSize);
     this.nodeMat.uniforms.uBright.value = this.style.nodeBright != null ? this.style.nodeBright : 1;
+    this.nodeMat.uniforms.uOpacity.value = this.style.nodeOpacity != null ? this.style.nodeOpacity : 1;
     this.flareMat.uniforms.uTaper.value = this.style.taper || 0;
     if (this.flares) { const vis = (this.style.taper || 0) > 0, was = this.flares.visible; this.flares.visible = vis; if (vis && !was) this.syncFlares(); }
     this.refreshColors(); this.updateLabels(true);
