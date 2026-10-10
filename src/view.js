@@ -1064,7 +1064,8 @@ export class CortexGraphView extends ItemView {
 
   fillPanel() {
     if (this.capture) this.capture();
-    const body = this.panelBody; body.empty();
+    this.panelBody.empty();
+    const body = this.panelBody.createDiv({ cls: 'cg-pcols' });
     const st = this.plugin.settings.style;
     let sec = body;
     for (const row of PANEL) {
@@ -1093,17 +1094,13 @@ export class CortexGraphView extends ItemView {
     wrap.createSpan({ text: t('rotate') });
     const cb = wrap.createEl('input', { type: 'checkbox' }); cb.checked = this.plugin.settings.rotate;
     cb.onchange = () => { this.plugin.settings.rotate = cb.checked; this.plugin.saveSettings(); this.plugin.refreshViews('style'); };
-    this.fillControls(body);
+    this.fillControls(this.panelBody);
   }
 
   fillControls(body) {
     const ps = this.plugin.settings;
-    const wrapC = body.createDiv({ cls: 'cg-sec-wrap cg-controls' + (this.ctrlOpen ? ' is-open' : '') });
-    const head = wrapC.createDiv({ cls: 'cg-sec cg-sec-toggle' });
-    const chev = head.createSpan({ cls: 'cg-chev' }); setIcon(chev, 'chevron-right');
-    head.createSpan({ text: t('secControls') });
-    const box = wrapC.createDiv({ cls: 'cg-ctrl-body' });
-    head.onclick = () => { this.ctrlOpen = !this.ctrlOpen; wrapC.toggleClass('is-open', this.ctrlOpen); };
+    const box = body.createDiv({ cls: 'cg-controls' });
+    box.createDiv({ cls: 'cg-sec', text: t('secControls') });
     box.createDiv({ cls: 'cg-ctrl-sub', text: t('ctrlKeyboard') });
     const save = () => { this.plugin.saveSettings(); this.plugin.views().forEach((v) => { if (v.R) v.R.mouse = ps.mouse; }); };
     const btns = [];

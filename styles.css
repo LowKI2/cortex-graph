@@ -193,16 +193,19 @@
 .cg-sec-wrap { display: inline-block; width: 100%; margin-bottom: 10px; }
 .cg-sec-wrap .cg-sec { margin-top: 4px; }
 
-/* controls (key/mouse bindings) */
-.cg-sec-toggle { cursor: pointer; display: flex; align-items: center; gap: 4px; user-select: none; }
-.cg-chev { display: inline-flex; transition: transform .15s; }
-.cg-chev svg { width: 14px; height: 14px; }
-.cg-controls.is-open .cg-chev { transform: rotate(90deg); }
-.cg-ctrl-body { display: none; }
-.cg-controls.is-open .cg-ctrl-body { display: block; }
+/* controls (key/mouse bindings) – third column of the settings panel */
+.cg-panel { width: min(960px, calc(100% - 16px)); }
+.cg-panel-body { columns: auto; display: flex; gap: 22px; align-items: flex-start; }
+.cg-pcols { flex: 2 1 540px; min-width: 0; columns: 2 240px; column-gap: 22px; }
+.cg-controls { flex: 1 1 260px; min-width: 240px; }
+.cg-root.is-mobile .cg-panel-body { flex-direction: column; }
+.cg-root.is-mobile .cg-pcols { columns: 1; }
+.cg-root.is-mobile .cg-controls { width: 100%; }
+@media (max-width: 900px) { .cg-panel-body { flex-wrap: wrap; } .cg-controls { flex-basis: 100%; } }
 .cg-ctrl-sub { margin-top: 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
 .cg-keyrow { margin-top: 3px; }
 .cg-keys { display: flex; gap: 4px; }
 .cg-key { min-width: 46px; height: 24px; padding: 0 6px; font-size: var(--font-ui-smaller); font-family: var(--font-monospace); }
 .cg-key.is-capturing { outline: 2px solid var(--interactive-accent); }
 .cg-ctrl-hint { margin-top: 8px; font-size: var(--font-ui-smaller); color: var(--text-faint); }
+.cg-controls > .cg-sec { margin-top: 4px; }
