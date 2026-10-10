@@ -4,7 +4,7 @@
                  groups (top-level folder index per node) are pulled to their own region (brain: lobes)
                  params {params} | pin {i,x,y,z} | unpin {i} | reheat {alpha} | stop
    Messages out: {pos:Float32Array, done:boolean} */
-let n = 0, dim = 3, x, y, z, vx, vy, vz, edges, m = 0, bias, str, groups = null, weights = null;
+let n = 0, dim = 3, x, y, z, vx, vy, vz, edges, m = 0, bias, str, groups = null, weights = null, levels = null;
 let P = { center: 0.5, repel: 10, link: 1, dist: 32 };
 let alpha = 0, alphaTarget = 0, running = false;
 const pin = new Map();
@@ -167,13 +167,18 @@ function inside(px, py, pz) {
 }
 function applyShape() {
   if (!P.shape || P.shape === 'free') return;
+  if (P.shape === 'triangle' && levels) { // pyramid: core at the apex, the rest layered downward by link distance / importance
+    const top = R * 0.95, bot = -R * 0.65, K = 0.12 * alpha + 0.004;
+    for (let i = 0; i < n; i++) { const l = levels[i]; if (l >= 0) vy[i] += (top - 0.04 * R - l * (top - bot) * 0.96 - y[i]) * K; }
+  }
   const GK = 0.08 * (P.shapeGroup == null ? 0.4 : P.shapeGroup) * alpha, d3 = dim === 3;
   for (let i = 0; i < n; i++) {
     const g = groups ? groups[i] : -1;
     if (GK > 0 && g >= 0 && targets[g]) { const t = targets[g]; vx[i] += (t[0] - x[i]) * GK; vy[i] += (t[1] - y[i]) * GK; if (d3) vz[i] += (t[2] - z[i]) * GK; }
     const nx = x[i] + vx[i], ny = y[i] + vy[i], nz = d3 ? z[i] + vz[i] : 0;
     const q = inside(nx, ny, nz);
-    if (q) { vx[i] += (q[0] - nx) * 0.35; vy[i] += (q[1] - ny) * 0.35; if (d3) vz[i] += (q[2] - nz) * 0.35; }
+    const CK = P.shape === 'triangle' ? 0.12 : 0.35; // softer walls for the pyramid, so it does not form hard faces
+    if (q) { vx[i] += (q[0] - nx) * CK; vy[i] += (q[1] - ny) * CK; if (d3) vz[i] += (q[2] - nz) * CK; }
     // brain: keep a cleft between the two hemispheres (above the cerebellum/stem)
     if (d3 && P.shape === 'brain' && ny > -0.2 * R) { const gap = 0.07 * R; if (Math.abs(nz) < gap) vz[i] += ((nz >= 0 ? 1 : -1) * gap - nz) * 0.2; }
   }
@@ -207,7 +212,8 @@ function step() {
   const HB = 0.22 * (P.hubPull == null ? 0.5 : P.hubPull) * alpha;
   for (let i = 0; i < n; i++) {
     const g = GR + (weights ? HB * weights[i] : 0);
-    vx[i] -= x[i] * g; vy[i] -= y[i] * g; vz[i] -= z[i] * g;
+    vx[i] -= x[i] * g; vz[i] -= z[i] * g;
+    if (!(P.shape === 'triangle' && levels)) vy[i] -= y[i] * g; // pyramid: height comes from the level, not from gravity
     vx[i] *= DECAY; vy[i] *= DECAY; vz[i] *= DECAY;
     x[i] += vx[i]; y[i] += vy[i]; z[i] = d3 ? z[i] + vz[i] : 0;
   }
@@ -238,7 +244,7 @@ self.onmessage = (e) => {
     x = new Float64Array(n); y = new Float64Array(n); z = new Float64Array(n);
     vx = new Float64Array(n); vy = new Float64Array(n); vz = new Float64Array(n);
     for (let i = 0; i < n; i++) { x[i] = d.pos[3 * i]; y[i] = d.pos[3 * i + 1]; z[i] = dim === 3 ? d.pos[3 * i + 2] : 0; }
-    groups = d.groups || null; weights = d.weights || null;
+    groups = d.groups || null; weights = d.weights || null; levels = d.levels || null;
     P = Object.assign(P, d.params || {}); prep(); shapeSetup(); pin.clear(); alphaTarget = 0; alpha = 0; kick(d.alpha);
   } else if (d.cmd === 'params') { const was = P.shape; P = Object.assign(P, d.params); shapeSetup(); kick(P.shape !== was ? 0.9 : 0.4); }
   else if (d.cmd === 'pin') { pin.set(d.i, [d.x, d.y, d.z || 0]); x[d.i] = d.x; y[d.i] = d.y; z[d.i] = d.z || 0; alphaTarget = 0.22; kick(0.22); }

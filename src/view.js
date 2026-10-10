@@ -147,6 +147,24 @@ export class CortexGraphView extends ItemView {
       shape: free ? 'free' : ps.shape || 'free', shapeSize: s.shapeSize, shapeGroup: s.shapeGroup, hubPull: s.hubPull, ngroups: this.groupCount || 0 };
   }
 
+  /* pyramid height per node (0 = apex .. 1 = base): link distance from the most important note, ties by importance;
+     spread so that each layer gets as many notes as the pyramid has room for (volume grows with depth^3, area with depth^2) */
+  pyramidLevels(weights, flat) {
+    const G = this.G, n = G.nodes.length, lv = new Float32Array(n).fill(-1);
+    let root = -1;
+    for (let k = 0; k < n; k++) if (weights[k] > 0 && (root < 0 || weights[k] > weights[root])) root = k;
+    if (root < 0) return lv;
+    const depth = new Int32Array(n).fill(-1), q = [root]; depth[root] = 0;
+    for (let h = 0; h < q.length; h++) { const a = q[h]; for (const b of G.adj[a]) if (depth[b] < 0) { depth[b] = depth[a] + 1; q.push(b); } }
+    let maxD = 0; for (let k = 0; k < n; k++) if (depth[k] > maxD) maxD = depth[k];
+    const ks = []; for (let k = 0; k < n; k++) if (!G.nodes[k].anchor && !G.nodes[k].hidden) ks.push(k);
+    const key = (k) => (depth[k] < 0 ? maxD + 2 : depth[k]) + (1 - weights[k]) * 0.95;
+    ks.sort((a, b) => key(a) - key(b));
+    const p = flat ? 0.5 : 1 / 3;
+    ks.forEach((k, i) => { lv[k] = Math.pow((i + 0.5) / ks.length, p); });
+    return lv;
+  }
+
   /* top-level folder index per node, biggest folder first (for the base form regions) */
   groupArray() {
     const nodes = this.G.nodes, top = (nd) => nd.note ? nd.note.folder || '' : nd.anchor && nd.key ? String(nd.key).slice(7).split('/')[0] : '';
@@ -265,7 +283,8 @@ export class CortexGraphView extends ItemView {
     let wmax = 0;
     G.nodes.forEach((nd, k) => { const v = nd.anchor || nd.hidden ? 0 : Math.sqrt((nd.rank ?? nd.deg) * (nd.w || 1)); weights[k] = v; if (v > wmax) wmax = v; });
     if (wmax > 0) for (let k = 0; k < n; k++) weights[k] /= wmax;
-    w.postMessage({ cmd: 'init', n, dim: flat ? 2 : 3, edges, pos, groups, weights, params: this.simParams(), alpha: alpha0 });
+    const levels = this.pyramidLevels(weights, flat);
+    w.postMessage({ cmd: 'init', n, dim: flat ? 2 : 3, edges, pos, groups, weights, levels, params: this.simParams(), alpha: alpha0 });
   }
 
   savePositions() {
