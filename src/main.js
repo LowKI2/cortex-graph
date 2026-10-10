@@ -1,14 +1,15 @@
-import { Plugin, PluginSettingTab, Setting, FuzzySuggestModal, TFolder, debounce, getAllTags } from 'obsidian';
+import { Plugin, PluginSettingTab, Setting, FuzzySuggestModal, TFolder, TFile, debounce, getAllTags } from 'obsidian';
 import { parseGraphCfg } from './model';
 import { FolderColors } from './folders';
 import { CortexGraphView, VIEW_TYPE } from './view';
 import { t } from './i18n';
 
+export const SHAPES = ['kreis', 'ring', 'stern', 'raute', 'quadrat'];
 const STYLE_DEFAULTS = { center: 2, repel: 10, link: 1, dist: 32, range: 250, nodeSize: 1, degSize: 1, glow: 1, line: 1,
   font: 4, fontGrow: 1.45, boldFrom: 15, labelFrom: 4, maxLabels: 150, dimOthers: 0.04 };
 const DEFAULTS = {
   layout: '3d', background: 'space', colorBy: 'obsidian', filters: true, orphans: false, labels: true, rotate: true,
-  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], folderLinks: 'hidden', rankBy: 'auto', recSave: 'ask', galaxies: true, views: [], style: Object.assign({}, STYLE_DEFAULTS),
+  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], folderLinks: 'hidden', rankBy: 'auto', recSave: 'ask', focusCamera: true, staleDays: 90, shapeDefault: 'kreis', hubStars: true, folderShapes: {}, claudeLive: true, galaxies: true, views: [], style: Object.assign({}, STYLE_DEFAULTS),
 };
 
 export default class CortexGraphPlugin extends Plugin {
@@ -27,6 +28,23 @@ export default class CortexGraphPlugin extends Plugin {
     this.addCommand({ id: 'find-path', name: t('cmdPath'), callback: () => this.findPath() });
     this.addSettingTab(new CortexGraphSettingTab(this.app, this));
 
+    // live activity: Claude (or any tool) reading / writing notes
+    this.startedAt = Date.now();
+    this.externalWrites = new Set();
+    this.lastEdit = new Map(); this.selfWrites = new Map();
+    this.registerEvent(this.app.workspace.on('editor-change', (ed, info) => { if (info && info.file) this.lastEdit.set(info.file.path, Date.now()); }));
+    const onExternal = (file) => {
+      if (!(file instanceof TFile) || file.extension !== 'md') return;
+      const now = Date.now();
+      if (now - (this.lastEdit.get(file.path) || 0) < 4000 || now - (this.selfWrites.get(file.path) || 0) < 4000) return;
+      if (now - this.startedAt < 8000) return; // ignore the start-up sync
+      this.activity(file.path, 'write');
+    };
+    this.registerEvent(this.app.vault.on('modify', onExternal));
+    this.registerEvent(this.app.vault.on('create', onExternal));
+    this.logPos = -1;
+    this.registerInterval(window.setInterval(() => this.pollActivityLog(), 1200));
+
     // folder colors in the file explorer
     this.fc = new FolderColors(this);
     this.app.workspace.onLayoutReady(() => { this.fc.watch(); this.fc.refresh(); });
@@ -36,7 +54,7 @@ export default class CortexGraphPlugin extends Plugin {
     this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
       if (!(file instanceof TFolder)) return;
       let changed = false;
-      for (const fc of [this.settings.folderColors, this.settings.folderWeights]) {
+      for (const fc of [this.settings.folderColors, this.settings.folderWeights, this.settings.folderShapes]) {
         for (const k of Object.keys(fc)) if (k === oldPath || k.startsWith(oldPath + '/')) { fc[file.path + k.slice(oldPath.length)] = fc[k]; delete fc[k]; changed = true; }
       }
       const hf = this.settings.hiddenFolders;
@@ -44,6 +62,41 @@ export default class CortexGraphPlugin extends Plugin {
       if (changed) this.saveSettings();
       this.fc.requestRefresh();
     }));
+  }
+
+  markSelf(path) { this.selfWrites.set(path, Date.now()); }
+
+  activity(path, op) {
+    if (!this.settings.claudeLive) return;
+    if (op === 'write') this.externalWrites.add(path);
+    for (const v of this.views()) v.onActivity(path, op);
+  }
+
+  /* <vault>/.cortex/activity.jsonl: one JSON object per line {"op":"read"|"write","path":"..."} – written by the
+     Cortex MCP server or a Claude Code hook, so reads become visible too */
+  async pollActivityLog() {
+    const ad = this.app.vault.adapter, p = '.cortex/activity.jsonl';
+    try {
+      const st = await ad.stat(p);
+      if (!st) return;
+      if (this.logPos < 0) { this.logPos = st.size; return; } // start at the end
+      if (st.size === this.logPos) return;
+      const txt = await ad.read(p);
+      const from = st.size < this.logPos ? 0 : this.logPos;
+      const chunk = new TextEncoder().encode(txt).slice(from);
+      this.logPos = st.size;
+      for (const line of new TextDecoder().decode(chunk).split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const ev = JSON.parse(line);
+          let path = String(ev.path || '').replace(/\\/g, '/');
+          const base = (ad.basePath || '').replace(/\\/g, '/');
+          if (base && path.toLowerCase().startsWith(base.toLowerCase() + '/')) path = path.slice(base.length + 1);
+          if (path) this.activity(path, ev.op === 'write' ? 'write' : 'read');
+        } catch { /* skip broken line */ }
+      }
+      if (st.size > 256000) { await ad.write(p, ''); this.logPos = 0; }
+    } catch { /* no log file */ }
   }
 
   // ------------------------------------------------ shared data access
@@ -85,6 +138,7 @@ export default class CortexGraphPlugin extends Plugin {
     this.settings = Object.assign({}, DEFAULTS, d);
     this.settings.folderColors = Object.assign({}, d.folderColors || {});
     this.settings.folderWeights = Object.assign({}, d.folderWeights || {});
+    this.settings.folderShapes = Object.assign({}, d.folderShapes || {});
     this.settings.hiddenFolders = Array.isArray(d.hiddenFolders) ? d.hiddenFolders.slice() : [];
     this.settings.views = Array.isArray(d.views) ? d.views.slice() : [];
     this.settings.style = Object.assign({}, STYLE_DEFAULTS, d.style || {});
@@ -176,7 +230,13 @@ class CortexGraphSettingTab extends PluginSettingTab {
     new Setting(el).setName(t('sOrphans')).addToggle((tg) => tg.setValue(s.orphans).onChange((v) => { s.orphans = v; save('data'); }));
     new Setting(el).setName(t('sLabels')).addToggle((tg) => tg.setValue(s.labels).onChange((v) => { s.labels = v; save('style'); p.views().forEach((w) => w.updateToolbar()); }));
     new Setting(el).setName(t('sRotate')).addToggle((tg) => tg.setValue(s.rotate).onChange((v) => { s.rotate = v; save('style'); }));
+    new Setting(el).setName(t('sShapeDefault')).setDesc(t('sShapeDesc')).addDropdown((d) => { for (const k of SHAPES) d.addOption(k, t('shape_' + k)); d.setValue(s.shapeDefault).onChange((v) => { s.shapeDefault = v; save('data'); }); });
+    new Setting(el).setName(t('sHubStars')).addToggle((tg) => tg.setValue(s.hubStars).onChange((v) => { s.hubStars = v; save('data'); }));
+    new Setting(el).setName(t('sStale')).setDesc(t('sStaleDesc')).addSlider((sl) => sl.setLimits(0, 365, 5).setValue(s.staleDays).setDynamicTooltip()
+      .onChange((v) => { s.staleDays = v; save('heat'); }));
     new Setting(el).setName(t('sBehavior')).setHeading();
+    new Setting(el).setName(t('sFocusCam')).setDesc(t('sFocusCamDesc')).addToggle((tg) => tg.setValue(s.focusCamera).onChange((v) => { s.focusCamera = v; p.saveSettings(); }));
+    new Setting(el).setName(t('sClaudeLive')).setDesc(t('sClaudeLiveDesc')).addToggle((tg) => tg.setValue(s.claudeLive).onChange((v) => { s.claudeLive = v; p.saveSettings(); }));
     new Setting(el).setName(t('sRecSave')).addDropdown((d) => d
       .addOption('ask', t('sRecAsk')).addOption('auto', t('sRecAuto')).setValue(s.recSave)
       .onChange((v) => { s.recSave = v; p.saveSettings(); }));

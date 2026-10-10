@@ -26,6 +26,13 @@ Works on **desktop and mobile** (touch controls included).
 - **Shortest path** between two notes – pick "Path from here", then the target. Also available as a command.
 - **Fly-to search** – type a name, the camera flies to the note.
 - **Link health check** – notes without links, dead ends and unresolved links are colored, with counts.
+- **Link suggestions** – inside the link check: notes that mention another note's name or alias without linking it are marked; select one to see dashed suggestion lines and link with one click.
+- **Create and link in the graph** – right-click empty space for a new note, right-click a node for a new linked note, Shift + drag from one node to another to add a link.
+- **Live activity** – notes changed outside the editor (e.g. by an AI agent via MCP or CLI) flash orange; tools can also log reads/writes to `.cortex/activity.jsonl` (`{"op":"read","path":"..."}` per line) to make reads visible.
+- **Review** – highlight notes changed today, since Obsidian started, in the last 7 days or externally.
+- **Faded corners** – notes untouched for a configurable number of days get paler and smaller.
+- **Node shapes** – circle, ring, star, diamond, square per folder, per note (`form` property) or automatically (stars for the most important notes).
+- **Camera focus** – a click flies to the note; a click on empty space returns to the previous view.
 - **Automatic priority** – names and font sizes follow the importance of a note, not just its link count: links across projects and areas count fully, links inside one project (e.g. chapters of a split document) only a little. A `priority` property (1–5 or low/medium/high) and folder weights refine it.
 - **Folder appearance** – right-click a folder: pick its color and weight (normal, important, primary). Primary folders get bigger nodes and names regardless of links.
 - **Colored file explorer** – top-level folders (and optionally their notes) are tinted in the graph colors.

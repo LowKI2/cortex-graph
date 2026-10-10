@@ -73,6 +73,8 @@ export class CortexGraphView extends ItemView {
     this.R.onDragEnd = (k) => this.simSend({ cmd: 'unpin', i: k });
     this.R.onHover = (k, e) => this.onHover(k, e);
     this.R.onContext = (k, e) => this.onContext(k, e);
+    this.R.onContextEmpty = (e) => this.onContextEmpty(e);
+    this.R.onLink = (a, b) => this.linkNotes(a, b);
 
     const ro = new ResizeObserver(() => this.R && this.R.resize());
     ro.observe(root); this.register(() => ro.disconnect());
@@ -171,10 +173,11 @@ export class CortexGraphView extends ItemView {
     const fw = s.folderWeights || {};
     for (const nd of G.nodes) nd.w = nd.note ? deepestFolderValue(fw, nd.note.path) || 1 : 1;
     if (s.rankBy !== 'links') importance(G.nodes); else for (const nd of G.nodes) nd.rank = null;
+    this.assignShapes(G.nodes);
     const sig = signature(G) + '|' + this.mode + '|' + s.layout + '|' + (s.hiddenFolders || []).join(',') + '|' + s.folderLinks + '|' + s.rankBy;
     const prevSel = this.sel >= 0 && this.G.nodes[this.sel] ? this.G.nodes[this.sel].key : null;
     if (!force && sig === this.sig) { // same structure: refresh colors + heat only
-      G.nodes.forEach((nd, k) => { if (this.G.nodes[k]) { this.G.nodes[k].note = nd.note; this.G.nodes[k].kind = nd.kind; this.G.nodes[k].w = nd.w; this.G.nodes[k].rank = nd.rank; } }); this.R.maxDeg = Math.max(1, ...this.G.nodes.filter((nd) => !nd.hidden && !nd.anchor).map((nd) => (nd.rank != null ? nd.rank : nd.deg) * (nd.w || 1))); this.G.stats = G.stats;
+      G.nodes.forEach((nd, k) => { if (this.G.nodes[k]) { this.G.nodes[k].note = nd.note; this.G.nodes[k].kind = nd.kind; this.G.nodes[k].w = nd.w; this.G.nodes[k].rank = nd.rank; this.G.nodes[k].shape = nd.shape; } }); this.R.applyShapes(); this.R.maxDeg = Math.max(1, ...this.G.nodes.filter((nd) => !nd.hidden && !nd.anchor).map((nd) => (nd.rank != null ? nd.rank : nd.deg) * (nd.w || 1))); this.G.stats = G.stats;
       this.R.refreshColors(); this.applyHeat(); this.applyOverlay(); this.updateInfo(); this.applyMask();
       return;
     }
@@ -186,6 +189,8 @@ export class CortexGraphView extends ItemView {
     if (prevSel && G.idx.has(prevSel)) this.select(G.idx.get(prevSel), false);
     else if (focus != null) { const k = G.idx.get(notes[focus].path); if (k != null) this.select(k, false); }
     this.applyHeat(); this.applyOverlay(); this.updateInfo(); if (this.tlOn) this.fillTags(); this.applyMask();
+    if (this.problems) { this.suggestions = null; this.applyOverlay(); }
+    if (this.reviewFn) this.refreshReview();
   }
 
   async layout(old, focus) {
@@ -247,6 +252,7 @@ export class CortexGraphView extends ItemView {
 
   applyHeat() {
     if (!this.R || !this.R.points) return;
+    this.applyStale();
     if (!this.activity) { this.R.setHeat(null); return; }
     const now = Date.now(), hl = this.plugin.settings.halfLife, n = this.G.nodes.length;
     const h = new Float32Array(n), mt = new Float64Array(n);
@@ -261,15 +267,44 @@ export class CortexGraphView extends ItemView {
     order.forEach((k, r) => { if (r >= none) h[k] = 0; else if (r > full) h[k] *= 1 - (r - full) / (none - full); });
     this.R.setHeat(h);
   }
+  /* notes nobody touched for a long time fade out */
+  applyStale() {
+    const days = this.plugin.settings.staleDays || 0, now = Date.now();
+    for (const nd of this.G.nodes) {
+      if (!days || !nd.note) { nd.stale = 0; continue; }
+      const age = (now - nd.note.mtime) / 86400000;
+      nd.stale = age <= days ? 0 : Math.min(1, (age - days) / (days * 2));
+    }
+  }
+
+  assignShapes(nodes) {
+    const s = this.plugin.settings, MAP = { kreis: 0, circle: 0, ring: 1, stern: 2, star: 2, raute: 3, diamond: 3, quadrat: 4, square: 4 };
+    const def = MAP[s.shapeDefault] ?? 0;
+    let hubFrom = Infinity;
+    if (s.hubStars) {
+      const r = nodes.filter((nd) => nd.note && !nd.hidden && !nd.anchor).map((nd) => (nd.rank ?? nd.deg) * (nd.w || 1)).sort((a, b) => b - a);
+      hubFrom = r[Math.max(0, Math.min(r.length - 1, Math.round(r.length * 0.02)))] || Infinity;
+    }
+    for (const nd of nodes) {
+      if (!nd.note) { nd.shape = 0; continue; }
+      const fmv = nd.note.fm && (nd.note.fm.form ?? nd.note.fm.shape);
+      const fromFm = fmv != null ? MAP[String(fmv).toLowerCase()] : undefined;
+      const fromFolder = deepestFolderValue(s.folderShapes || {}, nd.note.path);
+      nd.shape = fromFm ?? (fromFolder != null ? MAP[fromFolder] ?? 0 : ((nd.rank ?? nd.deg) * (nd.w || 1) >= hubFrom ? 2 : def));
+    }
+  }
+
 
   applyOverlay() {
     if (!this.R) return;
     this.legend.empty(); this.legend.toggle(this.problems);
-    if (!this.problems) { this.R.setOverlay(null, null); return; }
+    if (!this.problems) { this.R.setOverlay(null, null); this.R.setSuggestions(null); this.suggestions = null; return; }
+    if (!this.suggestions) this.computeSuggestions();
     const colors = [], bright = new Set();
     this.G.nodes.forEach((nd, k) => { if (nd.kind) { colors[k] = PROBLEM_COLORS[nd.kind]; bright.add(k); } else colors[k] = null; });
     // edges into unresolved ghosts: keep source visible
     for (const [a, b] of this.G.edges) if (this.G.nodes[b].ghost) bright.add(a);
+    if (this.suggestions) for (const x of this.suggestions) { const k = this.G.idx.get(x.from); if (k != null && !colors[k]) { colors[k] = '#ffc04d'; bright.add(k); } }
     this.R.setOverlay(colors, bright);
     for (const kind of ['orphan', 'deadEnd', 'unresolved']) {
       const row = this.legend.createDiv({ cls: 'cg-legend-row' });
@@ -277,6 +312,158 @@ export class CortexGraphView extends ItemView {
       row.createSpan({ text: t(kind) + ' ' });
       row.createEl('b', { text: String(this.G.stats[kind] || 0) });
     }
+    const row = this.legend.createDiv({ cls: 'cg-legend-row' });
+    row.createSpan({ cls: 'cg-dash' });
+    row.createSpan({ text: t('suggestions') + ' ' });
+    this.sugCount = row.createEl('b', { text: this.suggestions ? String(this.suggestions.length) : '…' });
+  }
+
+  onActivity(path, op) {
+    const k = this.G.idx.get(path);
+    if (k == null || !this.R || !this.R.active) return;
+    this.R.flash(k, op);
+    if (this.reviewKey === 'reviewClaude') this.refreshReview();
+  }
+
+  // ============================================================ link suggestions
+  /* finds notes that mention the name (or an alias) of another note without linking it */
+  async computeSuggestions() {
+    const token = (this.sugToken = (this.sugToken || 0) + 1);
+    this.suggestions = [];
+    const names = new Map();
+    for (const nd of this.G.nodes) {
+      if (!nd.note || nd.hidden) continue;
+      const add = (x) => { x = String(x || '').trim(); if (x.length >= 4 && !names.has(x.toLowerCase())) names.set(x.toLowerCase(), nd.note.path); };
+      add(nd.note.name);
+      const al = nd.note.fm && nd.note.fm.aliases;
+      (Array.isArray(al) ? al : al ? [al] : []).forEach(add);
+    }
+    if (!names.size) return;
+    const esc = [...names.keys()].sort((a, b) => b.length - a.length).map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const re = new RegExp('(^|[^\\p{L}\\p{N}])(' + esc.join('|') + ')(?![\\p{L}\\p{N}])', 'giu');
+    const out = [];
+    for (const nd of this.G.nodes) {
+      if (!nd.note || nd.hidden || !(nd.note.file instanceof TFile)) continue;
+      let txt = await this.app.vault.cachedRead(nd.note.file);
+      if (token !== this.sugToken) return;
+      txt = txt.replace(/^---\n[\s\S]*?\n---/, '').replace(/```[\s\S]*?```/g, ' ').replace(/`[^`\n]*`/g, ' ')
+        .replace(/!?\[\[[^\]]*\]\]/g, ' ').replace(/\[[^\]]*\]\([^)]*\)/g, ' ').replace(/https?:\/\/\S+/g, ' ');
+      const seen = new Set();
+      let m;
+      re.lastIndex = 0;
+      while ((m = re.exec(txt))) {
+        const target = names.get(m[2].toLowerCase());
+        if (!target || target === nd.note.path || seen.has(target)) continue;
+        const tn = this.byPath.get(target);
+        if (!tn || nd.note.out.has(tn.i)) continue;
+        seen.add(target);
+        out.push({ from: nd.note.path, to: target, text: m[2] });
+      }
+    }
+    if (token !== this.sugToken || !this.problems) return;
+    // drop names that appear unlinked almost everywhere (person names, generic words) and pairs already close in the graph
+    const per = new Map();
+    for (const x of out) per.set(x.to, (per.get(x.to) || 0) + 1);
+    const real = this.G.nodes.filter((nd) => nd.note && !nd.hidden).length;
+    const limit = Math.max(8, Math.round(real * 0.03));
+    const near = (a, b) => {
+      const na = this.byPath.get(a), nb = this.byPath.get(b);
+      if (!na || !nb) return false;
+      for (const j of [...na.out, ...na.back]) { const m = this.notes[j]; if (m.out.has(nb.i) || m.back.has(nb.i)) return true; }
+      return false;
+    };
+    this.suggestions = out.filter((x) => per.get(x.to) <= limit && !near(x.from, x.to));
+    this.applyOverlay();
+    this.showSuggestLines();
+    if (this.sugCount) this.sugCount.setText(String(this.suggestions.length));
+    if (this.sel >= 0) this.showSheet(this.sel);
+  }
+
+  /* dashed lines only for the selected note (all at once would be unreadable) */
+  showSuggestLines() {
+    if (!this.R) return;
+    const nd = this.sel >= 0 ? this.G.nodes[this.sel] : null;
+    if (!this.problems || !this.suggestions || !nd || !nd.note) { this.R.setSuggestions(null); return; }
+    const p = nd.note.path;
+    this.R.setSuggestions(this.suggestions.filter((x) => x.from === p || x.to === p)
+      .map((x) => [this.G.idx.get(x.from), this.G.idx.get(x.to)]).filter(([a, b]) => a != null && b != null));
+  }
+
+  /* turns the first plain mention into a link */
+  async applySuggestion(sg) {
+    const f = this.app.vault.getAbstractFileByPath(sg.from), tf = this.app.vault.getAbstractFileByPath(sg.to);
+    if (!(f instanceof TFile) || !(tf instanceof TFile)) return;
+    const lt = this.app.metadataCache.fileToLinktext(tf, f.path, true);
+    let done = false;
+    this.plugin.markSelf(f.path);
+    await this.app.vault.process(f, (txt) => {
+      const esc = sg.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp('(\\[\\[[^\\]]*\\]\\]|```[\\s\\S]*?```|`[^`\\n]*`)|(^|[^\\p{L}\\p{N}])(' + esc + ')(?![\\p{L}\\p{N}])', 'giu');
+      return txt.replace(re, (all, skip, pre, hit) => {
+        if (skip || done) return all;
+        done = true;
+        return pre + (hit.toLowerCase() === lt.toLowerCase() ? '[[' + hit + ']]' : '[[' + lt + '|' + hit + ']]');
+      });
+    });
+    if (done) { new Notice(t('sugDone', sg.text)); this.suggestions = this.suggestions.filter((x) => x !== sg); }
+  }
+
+  // ============================================================ create + link notes
+  async linkNotes(a, b) {
+    const na = this.noteOf(a), nb = this.noteOf(b);
+    if (!na || !nb) return;
+    const lt = this.app.metadataCache.fileToLinktext(nb.file, na.path, true);
+    this.plugin.markSelf(na.path);
+    await this.app.vault.process(na.file, (txt) => txt.replace(/\s*$/, '') + '\n\n[[' + lt + ']]\n');
+    new Notice(t('linkDone', na.name, nb.name));
+  }
+
+  async createNote(near) {
+    const base = near && near.note ? near.note.file.parent : this.app.fileManager.getNewFileParent('');
+    new NameModal(this.app, near ? t('newLinked', near.label) : t('newNote'), '', async (name) => {
+      const folder = base && base.path !== '/' ? base.path + '/' : '';
+      let path = folder + name.replace(/[\\/:*?"<>|]/g, '-') + '.md', i = 1;
+      while (this.app.vault.getAbstractFileByPath(path)) path = folder + name + ' ' + (++i) + '.md';
+      const body = near && near.note ? '\n\n' + t('relatedTo') + ' [[' + this.app.metadataCache.fileToLinktext(near.note.file, path, true) + ']]\n' : '';
+      this.plugin.markSelf(path);
+      const f = await this.app.vault.create(path, '# ' + name + body);
+      await this.app.workspace.getLeaf('tab').openFile(f);
+    }).open();
+  }
+
+  onContextEmpty(e) {
+    const menu = new Menu();
+    menu.addItem((i) => i.setTitle(t('newNote')).setIcon('file-plus').onClick(() => this.createNote(null)));
+    if (this.R.camBefore) menu.addItem((i) => i.setTitle(t('camBack')).setIcon('undo-2').onClick(() => this.R.restoreCamera()));
+    menu.addItem((i) => i.setTitle(t('fit')).setIcon('maximize').onClick(() => this.R.resetView()));
+    menu.showAtMouseEvent(e);
+  }
+
+  // ============================================================ session review
+  reviewMenu(e) {
+    const menu = new Menu(), day = 86400000, now = Date.now();
+    const start = moment().startOf('day').valueOf();
+    const opts = [['reviewToday', (n) => n.mtime >= start], ['reviewSession', (n) => n.mtime >= this.plugin.startedAt],
+      ['reviewWeek', (n) => n.mtime >= now - 7 * day], ['reviewClaude', (n) => this.plugin.externalWrites.has(n.path)]];
+    for (const [key, fn] of opts) menu.addItem((i) => i.setTitle(t(key)).setChecked(this.reviewKey === key).onClick(() => this.setReview(key, fn)));
+    if (this.reviewKey) { menu.addSeparator(); menu.addItem((i) => i.setTitle(t('reviewOff')).setIcon('x').onClick(() => this.setReview(null))); }
+    menu.showAtMouseEvent(e);
+  }
+
+  setReview(key, fn) {
+    this.reviewKey = key; this.reviewFn = fn || null;
+    this.refreshReview();
+    this.updateToolbar();
+  }
+
+  refreshReview() {
+    if (!this.reviewFn) { this.reviewSet = null; this.R.setHighlight(null); this.hint.toggle(false); return; }
+    const set = new Set();
+    this.G.nodes.forEach((nd, k) => { if (nd.note && this.reviewFn(nd.note)) set.add(k); });
+    this.reviewSet = set;
+    this.R.setHighlight(set);
+    this.hint.setText(t('reviewCount', set.size)); this.hint.toggle(set.size === 0);
+    if (set.size) this.R.fitTo([...set]);
   }
 
   updateInfo() {
@@ -289,7 +476,7 @@ export class CortexGraphView extends ItemView {
 
   highlightPath(path, folder) {
     if (!this.R || !this.R.active) return;
-    if (!path) { this.R.setHighlight(null); this.R.setGalaxy(null); this.hint.toggle(false); return; }
+    if (!path) { this.R.setHighlight(this.reviewSet || null); this.R.setGalaxy(null); this.hint.toggle(false); return; }
     const set = new Set();
     if (folder) { const pre = path === '/' ? '' : path + '/'; this.G.nodes.forEach((nd, k) => { if (nd.note && nd.note.path.startsWith(pre)) set.add(k); }); }
     else { const k = this.G.idx.get(path); if (k != null) set.add(k); }
@@ -317,7 +504,7 @@ export class CortexGraphView extends ItemView {
   }
 
   onTap(k, dbl, e) {
-    if (k < 0) { if (this.pathPending) return; this.select(-1); return; }
+    if (k < 0) { if (this.pathPending) return; this.select(-1); this.R.restoreCamera(); return; }
     if (this.pathPending) { this.finishPath(k); return; }
     const mod = e && (e.ctrlKey || e.metaKey);
     if (this.noteOf(k) && (mod || dbl || this.plugin.settings.clickOpens)) { this.openNote(k, mod); if (!this.plugin.settings.clickOpens) return; }
@@ -328,8 +515,9 @@ export class CortexGraphView extends ItemView {
     this.sel = k;
     if (this.R.pathSet) this.R.setPath(null);
     this.R.setSelected(k);
+    this.showSuggestLines();
     if (k < 0) { this.hideSheet(); return; }
-    if (fly && Platform.isMobile) this.R.focusNode(k);
+    if (fly && (Platform.isMobile || this.plugin.settings.focusCamera !== false)) this.R.focusNode(k);
     this.showSheet(k);
   }
 
@@ -348,6 +536,7 @@ export class CortexGraphView extends ItemView {
       menu.addItem((i) => i.setTitle(t('open')).setIcon('file').onClick(() => this.openNote(k, false)));
       menu.addItem((i) => i.setTitle(t('openTab')).setIcon('file-plus').onClick(() => this.openNote(k, true)));
       menu.addItem((i) => i.setTitle(t('focus')).setIcon('git-fork').onClick(() => this.focusOn(n.path)));
+      menu.addItem((i) => i.setTitle(t('newLinkedShort')).setIcon('file-plus-2').onClick(() => this.createNote(this.G.nodes[k])));
     }
     menu.addItem((i) => i.setTitle(t('pathFrom')).setIcon('route').onClick(() => this.startPath(k)));
     if (n) { menu.addSeparator(); this.app.workspace.trigger('file-menu', menu, n.file, 'cortex-graph-context-menu', this.leaf); }
@@ -720,6 +909,7 @@ export class CortexGraphView extends ItemView {
     const tb = (icon, label, fn) => { const b = bar.createEl('button', { cls: 'cg-tool clickable-icon', attr: { 'aria-label': label } }); setIcon(b, icon); b.onclick = fn; return b; };
     this.btnLabels = tb('type', t('sLabels'), () => { this.plugin.settings.labels = !this.plugin.settings.labels; this.plugin.saveSettings(); this.plugin.refreshViews('style'); this.plugin.views().forEach((v) => v.updateToolbar()); });
     this.btnActivity = tb('flame', t('activity'), () => { this.activity = !this.activity; this.plugin.settings.activity = this.activity; this.plugin.saveSettings(); this.updateToolbar(); this.applyHeat(); });
+    this.btnReview = tb('calendar-clock', t('reviewTitle'), (e) => this.reviewMenu(e));
     this.btnViews = tb('bookmark', t('viewsTitle'), (e) => this.viewsMenu(e));
     this.btnTime = tb('history', t('tlTitle'), () => this.toggleTimeline());
     this.btnProblems = tb('stethoscope', t('problems'), async () => { this.problems = !this.problems; this.updateToolbar(); await this.rebuild(true); this.R.resetView(); });
@@ -737,6 +927,7 @@ export class CortexGraphView extends ItemView {
     this.btnLabels.toggleClass('is-active', this.plugin.settings.labels);
     this.btnProblems.toggleClass('is-active', this.problems);
     this.btnTime.toggleClass('is-active', !!this.tlOn);
+    this.btnReview.toggleClass('is-active', !!this.reviewKey);
     if (this.panel) this.btnPanel.toggleClass('is-active', this.panel.isShown());
   }
 
@@ -792,6 +983,7 @@ export class CortexGraphView extends ItemView {
     b(this.sheetBtns, t('focus'), () => { const n = this.noteOf(this.sel); if (n) this.focusOn(n.path); });
     b(this.sheetBtns, t('pathFrom'), () => { if (this.sel >= 0) this.startPath(this.sel); });
     this.sheetPathBtns = sh.createDiv({ cls: 'cg-sheet-btns' }); this.sheetPathBtns.toggle(false);
+    this.sheetSug = sh.createDiv({ cls: 'cg-sug' });
     b(this.sheetPathBtns, t('pathClear'), () => { this.pathPending = false; this.R.setPath(null); this.hideSheet(); });
   }
 
@@ -807,6 +999,20 @@ export class CortexGraphView extends ItemView {
       this.sheetBtns.toggle(true);
     } else { this.sheetMeta.setText(t('unresolved')); this.sheetBtns.toggle(false); }
     this.sheetPathBtns.toggle(false);
+    this.sheetSug.empty();
+    if (this.problems && this.suggestions && nd.note) {
+      const mine = this.suggestions.filter((x) => x.from === nd.note.path || x.to === nd.note.path).slice(0, 6);
+      if (mine.length) {
+        this.sheetSug.createDiv({ cls: 'cg-sug-title', text: t('suggestions') });
+        for (const sg of mine) {
+          const r = this.sheetSug.createDiv({ cls: 'cg-sug-row' });
+          const other = sg.from === nd.note.path ? '→ ' + sg.to.split('/').pop().replace(/\.md$/, '') : '← ' + sg.from.split('/').pop().replace(/\.md$/, '');
+          r.createSpan({ text: other + ' („' + sg.text + '“)' });
+          const b = r.createEl('button', { text: t('sugLink') });
+          b.onclick = async () => { b.disabled = true; await this.applySuggestion(sg); r.remove(); };
+        }
+      }
+    }
     this.sheet.toggle(true);
     this.syncSheetSpace();
   }
@@ -832,10 +1038,11 @@ export class CortexGraphView extends ItemView {
   fillPanel() {
     const body = this.panelBody; body.empty();
     const st = this.plugin.settings.style;
+    let sec = body;
     for (const row of PANEL) {
-      if (row.length === 1) { body.createDiv({ cls: 'cg-sec', text: t(row[0]) }); continue; }
+      if (row.length === 1) { sec = body.createDiv({ cls: 'cg-sec-wrap' }); sec.createDiv({ cls: 'cg-sec', text: t(row[0]) }); continue; }
       const [key, min, max, step] = row;
-      const wrap = body.createEl('label', { cls: 'cg-row' });
+      const wrap = sec.createEl('label', { cls: 'cg-row' });
       const top = wrap.createSpan({ cls: 'cg-row-top' });
       top.createSpan({ text: t(key) });
       const out = top.createEl('b', { text: fmt(st[key], step) });
@@ -843,7 +1050,7 @@ export class CortexGraphView extends ItemView {
       rg.value = String(st[key]);
       rg.oninput = () => { const v = Number(rg.value); out.setText(fmt(v, step)); this.setStyleKey(key, v); };
     }
-    const wrap = body.createEl('label', { cls: 'cg-row cg-row-check' });
+    const wrap = sec.createEl('label', { cls: 'cg-row cg-row-check' });
     wrap.createSpan({ text: t('rotate') });
     const cb = wrap.createEl('input', { type: 'checkbox' }); cb.checked = this.plugin.settings.rotate;
     cb.onchange = () => { this.plugin.settings.rotate = cb.checked; this.plugin.saveSettings(); this.plugin.refreshViews('style'); };

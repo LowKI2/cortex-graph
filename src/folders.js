@@ -119,6 +119,7 @@ class FolderColorModal extends Modal {
     let pick = this.fc.custom[this.path] || this.fc.colorOf(this.path) || PALETTE[0];
     let custom = !!this.fc.custom[this.path];
     let weight = this.fc.weights[this.path] || 1;
+    let shape = (this.fc.plugin.settings.folderShapes || {})[this.path] || '';
     contentEl.createDiv({ cls: 'setting-item-name', text: t('folderColorCustom') });
     const sw = contentEl.createDiv({ cls: 'cg-swatches' });
     const mark = () => sw.querySelectorAll('.cg-swatch').forEach((b) => b.toggleClass('is-selected', b.getAttribute('data-c') === pick));
@@ -133,9 +134,15 @@ class FolderColorModal extends Modal {
     new Setting(contentEl).setName(t('folderWeight')).setDesc(t('folderWeightDesc')).addDropdown((d) => d
       .addOption('1', t('weightNormal')).addOption('1.6', t('weightImportant')).addOption('2.4', t('weightPrimary'))
       .setValue(String(weight)).onChange((v) => { weight = Number(v); }));
+    new Setting(contentEl).setName(t('folderShape')).addDropdown((d) => {
+      d.addOption('', t('shape_auto'));
+      for (const k of ['kreis', 'ring', 'stern', 'raute', 'quadrat']) d.addOption(k, t('shape_' + k));
+      d.setValue(shape).onChange((v) => { shape = v; });
+    });
+    const saveShape = async (v) => { const m = this.fc.plugin.settings.folderShapes || (this.fc.plugin.settings.folderShapes = {}); if (v) m[this.path] = v; else delete m[this.path]; };
     new Setting(contentEl)
-      .addButton((b) => b.setButtonText(t('reset')).onClick(async () => { await this.fc.setStyle(this.path, null, 1); this.close(); }))
-      .addButton((b) => b.setButtonText(t('apply')).setCta().onClick(async () => { await this.fc.setStyle(this.path, custom ? pick : null, weight); this.close(); }));
+      .addButton((b) => b.setButtonText(t('reset')).onClick(async () => { await saveShape(''); await this.fc.setStyle(this.path, null, 1); this.close(); }))
+      .addButton((b) => b.setButtonText(t('apply')).setCta().onClick(async () => { await saveShape(shape); await this.fc.setStyle(this.path, custom ? pick : null, weight); this.close(); }));
   }
   onClose() { this.contentEl.empty(); }
 }

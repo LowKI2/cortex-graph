@@ -1,7 +1,7 @@
 /* Cortex Graph – WebGL renderer with glowing nodes (three.js). */
 import {
   WebGLRenderer, Scene, FogExp2, PerspectiveCamera, Group, BufferGeometry, BufferAttribute, Points, LineSegments,
-  ShaderMaterial, AdditiveBlending, NormalBlending, Vector2, Vector3, Raycaster, Plane, Color,
+  ShaderMaterial, LineDashedMaterial, AdditiveBlending, NormalBlending, Vector2, Vector3, Raycaster, Plane, Color,
   Sprite, SpriteMaterial, CanvasTexture,
 } from 'three';
 
@@ -60,28 +60,33 @@ export class GraphRenderer {
     return new ShaderMaterial({
       uniforms: { uScale: { value: 300 }, uCore: { value: coreAmt }, uMin: { value: fog ? 0.5 : 0.0 }, uGlow: { value: 1.0 }, uTime: { value: 0 }, uLight: { value: 0 } },
       vertexShader: `
-        attribute float size; attribute float alpha; attribute vec3 color; attribute float heat;
-        varying vec3 vColor; varying float vAlpha; varying float vHeat;
+        attribute float size; attribute float alpha; attribute vec3 color; attribute float heat; attribute float shape;
+        varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape;
         uniform float uScale; uniform float uMin;
         void main() {
-          vColor = color; vAlpha = alpha; vHeat = heat;
+          vColor = color; vAlpha = alpha; vHeat = heat; vShape = shape;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
           float ps = size * uScale / -mv.z;
           gl_PointSize = clamp(max(ps, size * uMin), 2.0, 240.0);
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: `
-        varying vec3 vColor; varying float vAlpha; varying float vHeat;
+        varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape;
         uniform float uCore; uniform float uGlow; uniform float uTime; uniform float uLight;
         void main() {
           vec2 c = gl_PointCoord - 0.5;
           float d = length(c) * 2.0;
           if (d > 1.0) discard;
           float pulse = 1.0 + vHeat * 0.55 * (0.5 + 0.5 * sin(uTime * 2.6));
-          float core = smoothstep(0.32, 0.0, d);
+          // node shapes: 0 circle, 1 ring, 2 star, 3 diamond, 4 square
+          float dc = d;
+          if (vShape > 3.5) dc = max(abs(c.x), abs(c.y)) * 2.6;
+          else if (vShape > 2.5) dc = (abs(c.x) + abs(c.y)) * 2.2;
+          else if (vShape > 1.5) { float an = atan(c.y, c.x); dc = d / (0.45 + 0.55 * pow(abs(cos(2.5 * an)), 4.0)) * 0.75; }
+          float core = vShape > 0.5 && vShape < 1.5 ? smoothstep(0.1, 0.0, abs(d - 0.3)) : smoothstep(0.32, 0.0, dc);
           float halo = pow(1.0 - d, 2.6) * pulse;
           if (uLight > 0.5) {
-            float disc = smoothstep(0.62, 0.5, d);
+            float disc = vShape > 0.5 && vShape < 1.5 ? smoothstep(0.14, 0.06, abs(d - 0.45)) : smoothstep(0.62, 0.5, vShape > 0.5 ? dc * 1.6 : d);
             float a = max(disc, halo * 0.45 * uGlow);
             gl_FragColor = vec4(vColor * (0.75 + 0.25 * core), a * vAlpha);
             return;
@@ -107,6 +112,7 @@ export class GraphRenderer {
     g.setAttribute('size', new BufferAttribute(s, 1));
     g.setAttribute('alpha', new BufferAttribute(a, 1));
     g.setAttribute('heat', new BufferAttribute(h, 1));
+    g.setAttribute('shape', new BufferAttribute(new Float32Array(N), 1));
     this.stars = new Points(g, this.starMat); this.stars.frustumCulled = false;
     this.scene.add(this.stars);
   }
@@ -142,6 +148,7 @@ export class GraphRenderer {
     g.setAttribute('size', new BufferAttribute(new Float32Array(n), 1));
     g.setAttribute('alpha', new BufferAttribute(new Float32Array(n), 1));
     g.setAttribute('heat', new BufferAttribute(new Float32Array(n), 1));
+    g.setAttribute('shape', new BufferAttribute(new Float32Array(n), 1));
     this.points = new Points(g, this.nodeMat); this.points.frustumCulled = false; this.root.add(this.points);
     const m = edges.length;
     const lg = new BufferGeometry();
@@ -150,8 +157,11 @@ export class GraphRenderer {
     lg.setAttribute('alpha', new BufferAttribute(new Float32Array(m * 2), 1));
     this.lines = new LineSegments(lg, this.lineMat); this.lines.frustumCulled = false; this.root.add(this.lines);
     this.heat = new Float32Array(n);
+    this.flashes = new Map();
+    this.applyShapes();
     this.refreshColors();
     this.syncLines();
+    this.setSuggestions(this.suggest || null);
   }
 
   /* recompute base colors (after color/heat/problem changes) */
@@ -163,8 +173,10 @@ export class GraphRenderer {
       let rgb = this.light ? hexToRgb(hex) : boost(hexToRgb(hex));
       const h = this.heat ? this.heat[k] : 0;
       if (h > 0) rgb = mix(rgb, HEAT_RGB, Math.min(0.75, h * 0.8));
+      const st = nd.stale || 0;
+      if (st > 0) rgb = mix(rgb, this.light ? [0.6, 0.6, 0.6] : [0.35, 0.35, 0.42], st * 0.75);
       this.baseColor.push(rgb);
-      this.baseSize.push((14 * this.style.nodeSize + Math.sqrt(nd.deg) * 7 * this.style.degSize) * (1 + h * 0.9) * (nd.ghost ? 0.8 : 1) * (nd.w || 1));
+      this.baseSize.push((14 * this.style.nodeSize + Math.sqrt(nd.deg) * 7 * this.style.degSize) * (1 + h * 0.9) * (nd.ghost ? 0.8 : 1) * (nd.w || 1) * (1 - 0.35 * (nd.stale || 0)));
     }
     this.paint();
   }
@@ -242,6 +254,59 @@ export class GraphRenderer {
 
   setMask(set) { this.mask = set || null; this.paint(); this.updateLabels(true); }
 
+  applyShapes() {
+    if (!this.points) return;
+    const sh = this.points.geometry.attributes.shape;
+    for (let k = 0; k < this.nodes.length; k++) sh.array[k] = this.nodes[k].shape || 0;
+    sh.needsUpdate = true;
+  }
+
+  /* short flash on a node, e.g. Claude reading (cyan) or writing (orange) it */
+  flash(k, kind) {
+    if (!this.points || k == null || k < 0) return;
+    this.flashes.set(k, { t: performance.now(), c: kind === 'write' ? [1, 0.55, 0.2] : [0.35, 0.9, 1], f: 1 });
+    this.flashLabel = { k, until: performance.now() + 2500 };
+  }
+
+  updateFlashes() {
+    if (!this.flashes || !this.flashes.size) return;
+    const now = performance.now();
+    for (const [k, fl] of this.flashes) { fl.f = Math.max(0, 1 - (now - fl.t) / 2500); if (fl.f <= 0) this.flashes.delete(k); }
+    this.paint();
+  }
+
+  /* dashed lines for link suggestions: [[a, b], ...] */
+  setSuggestions(pairs) {
+    this.suggest = pairs;
+    if (this.sugLines) { this.root.remove(this.sugLines); this.sugLines.geometry.dispose(); this.sugLines = null; }
+    if (!pairs || !pairs.length || !this.points) return;
+    const g = new BufferGeometry();
+    g.setAttribute('position', new BufferAttribute(new Float32Array(pairs.length * 6), 3));
+    if (!this.sugMat) this.sugMat = new LineDashedMaterial({ color: 0xffc04d, dashSize: 5, gapSize: 4, transparent: true, opacity: 0.85, depthWrite: false });
+    this.sugLines = new LineSegments(g, this.sugMat); this.sugLines.frustumCulled = false; this.root.add(this.sugLines);
+    this.syncSuggest();
+  }
+
+  syncSuggest() {
+    if (!this.sugLines) return;
+    const lp = this.sugLines.geometry.attributes.position.array, nodes = this.nodes;
+    this.suggest.forEach(([ka, kb], i) => {
+      const a = nodes[ka], b = nodes[kb]; if (!a || !b) return;
+      lp[6 * i] = a.x; lp[6 * i + 1] = a.y; lp[6 * i + 2] = a.z || 0; lp[6 * i + 3] = b.x; lp[6 * i + 4] = b.y; lp[6 * i + 5] = b.z || 0;
+    });
+    this.sugLines.geometry.attributes.position.needsUpdate = true;
+    this.sugLines.computeLineDistances();
+  }
+
+  /* remember / restore the camera around a focus on a node */
+  saveCamera() { if (!this.camBefore) this.camBefore = { ...this.getCamera(), moved: this.userMoved }; }
+  restoreCamera() {
+    if (!this.camBefore) return false;
+    const c = this.camBefore; this.camBefore = null;
+    this.setCamera(c); this.userMoved = c.moved;
+    return true;
+  }
+
   /* external highlight (e.g. hovering a file or folder in the file explorer) */
   setHighlight(set) {
     this.hl = set || null;
@@ -267,6 +332,7 @@ export class GraphRenderer {
       lp[6 * k + 3] = b.x; lp[6 * k + 4] = b.y; lp[6 * k + 5] = b.z || 0;
     }
     this.lines.geometry.attributes.position.needsUpdate = true;
+    if (this.sugLines && (this.sugTick = (this.sugTick || 0) + 1) % 3 === 0) this.syncSuggest();
   }
 
   setPositions(p) {
@@ -299,6 +365,9 @@ export class GraphRenderer {
       else if (bright && this.colorOverride && this.colorOverride[k]) { s = Math.max(s, 26) * 1.7; }
       if (this.hl) { if (this.hl.has(k)) { s = Math.max(s, 22) * 1.7; c = mix(c, [1, 1, 1], 0.35); a = 1; } else a = this.style.dimOthers != null ? this.style.dimOthers : 0.04; }
       if (this.isOff(k)) { a = 0; s = 0; } else if (this.fresh && this.fresh.has(k)) { s *= 1.9; c = mix(c, [1, 1, 1], 0.5); }
+      if (!this.hl && this.nodes[k].stale) a *= 1 - 0.55 * this.nodes[k].stale;
+      const fl = this.flashes && this.flashes.get(k);
+      if (fl) { const f = fl.f; s = Math.max(s, 20) * (1 + 1.6 * f); c = mix(c, fl.c, Math.min(1, f * 1.3)); a = Math.max(a, f); }
       if (k === this.hover) s *= 1.35;
       al[k] = a; sz[k] = s; col[3 * k] = c[0]; col[3 * k + 1] = c[1]; col[3 * k + 2] = c[2];
     }
@@ -340,6 +409,7 @@ export class GraphRenderer {
 
   focusNode(k) {
     if (k < 0 || !this.nodes[k]) return;
+    this.saveCamera();
     const nd = this.nodes[k];
     this.targetGoal.set(nd.x, nd.y, nd.z || 0);
     this.distGoal = Math.min(this.distGoal, 260);
@@ -417,6 +487,7 @@ export class GraphRenderer {
       }
     }
     if (this.hl) want = [...this.hl].sort((a, b) => rk(nodes[b]) - rk(nodes[a])).slice(0, Math.max(40, st.maxLabels)); // only the hovered folder/file
+    if (this.flashLabel && performance.now() < this.flashLabel.until && !want.includes(this.flashLabel.k)) want.unshift(this.flashLabel.k);
     if (this.hover >= 0 && !want.includes(this.hover)) want.unshift(this.hover);
     while (this.labelPool.length < want.length) this.labelPool.push(layer.createDiv({ cls: 'cg-label' }));
     const placed = [];
@@ -465,8 +536,10 @@ export class GraphRenderer {
     on('pointerdown', (e) => {
       canvas.setPointerCapture(e.pointerId);
       const [x, y] = rect(e); ptr.set(e.pointerId, { x, y });
-      const panMode = e.button === 2 || e.button === 1 || e.shiftKey;
-      if (ptr.size === 1) gest = { t: Date.now(), x0: x, y0: y, moved: 0, drag: panMode ? -1 : this.pick(x, y), pan: panMode, btn: e.button, ev: e };
+      const under = this.pick(x, y);
+      const linkMode = e.shiftKey && e.button === 0 && under >= 0 && !!this.nodes[under].note && !!this.onLink;
+      const panMode = !linkMode && (e.button === 2 || e.button === 1 || e.shiftKey);
+      if (ptr.size === 1) gest = { t: Date.now(), x0: x, y0: y, moved: 0, drag: panMode || linkMode ? -1 : under, pan: panMode, link: linkMode ? under : -1, btn: e.button, ev: e };
       else if (gest) { if (this.dragK >= 0 && this.onDragEnd) this.onDragEnd(this.dragK); this.dragK = -1; gest.moved = 999; gest.drag = -1; }
       this.lastInteract = Date.now();
       this.setHover(-1);
@@ -480,6 +553,7 @@ export class GraphRenderer {
       const p = ptr.get(e.pointerId);
       if (ptr.size === 1) {
         if (gest) gest.moved += Math.abs(x - p.x) + Math.abs(y - p.y);
+        if (gest && gest.link >= 0) { this.drawLinkLine(gest.link, x, y); p.x = x; p.y = y; return; }
         if (gest && gest.drag >= 0) {
           if (gest.moved >= 6) {
             const k = gest.drag, nd = this.nodes[k];
@@ -517,6 +591,12 @@ export class GraphRenderer {
         if (this.dragK >= 0 && this.onDragEnd) this.onDragEnd(this.dragK);
         this.dragK = -1;
         lastMoved = gest.moved;
+        if (gest.link >= 0) {
+          this.drawLinkLine(-1);
+          const [ux, uy] = rect(e); const tk = this.pick(ux, uy);
+          if (tk >= 0 && tk !== gest.link && this.nodes[tk].note) this.onLink(gest.link, tk);
+          gest = null; return;
+        }
         if (gest.btn === 0 && gest.moved < 10 && Date.now() - gest.t < 450) {
           const k = this.pick(gest.x0, gest.y0), now = Date.now();
           const dbl = k >= 0 && lastTap.k === k && now - lastTap.t < 350;
@@ -533,12 +613,28 @@ export class GraphRenderer {
       if ((gest ? gest.moved : lastMoved) > 8) return;
       const [x, y] = rect(e); const k = this.pick(x, y);
       if (k >= 0 && this.onContext) this.onContext(k, e);
+      else if (k < 0 && this.onContextEmpty) this.onContextEmpty(e);
     });
     on('wheel', (e) => {
       e.preventDefault();
       this.distGoal = this.dist = Math.max(30, Math.min(12000, this.dist * (e.deltaY > 0 ? 1.12 : 1 / 1.12)));
       this.userMoved = true; this.lastInteract = Date.now();
     }, { passive: false });
+  }
+
+  drawLinkLine(k, x, y) {
+    if (!this.linkSvg) {
+      const ns = 'http://www.w3.org/2000/svg';
+      this.linkSvg = document.createElementNS(ns, 'svg'); this.linkSvg.setAttribute('class', 'cg-linkline');
+      this.linkPath = document.createElementNS(ns, 'line'); this.linkSvg.appendChild(this.linkPath);
+      this.labelLayer.appendChild(this.linkSvg);
+    }
+    if (k < 0) { this.linkSvg.classList.remove('is-on'); return; }
+    const p = this.project(k);
+    this.linkSvg.classList.add('is-on');
+    this.linkPath.setAttribute('x1', String(p.x)); this.linkPath.setAttribute('y1', String(p.y));
+    this.linkPath.setAttribute('x2', String(x)); this.linkPath.setAttribute('y2', String(y));
+    const t = this.pick(x, y); this.setHover(t >= 0 && t !== k ? t : -1);
   }
 
   setHover(k) {
@@ -578,6 +674,7 @@ export class GraphRenderer {
     c.lookAt(t);
     this.nodeMat.uniforms.uTime.value = (now - this.t0) / 1000;
     this.stars.rotation.y += dt * 0.004;
+    this.updateFlashes();
     this.updateGalaxy(dt);
     this.renderer.render(this.scene, c);
     this.updateLabels(false);
@@ -639,6 +736,8 @@ export class GraphRenderer {
     for (const o of [this.points, this.lines, this.stars]) if (o) o.geometry.dispose();
     this.nodeMat.dispose(); this.lineMat.dispose(); this.starMat.dispose();
     if (this.galaxyMat) { this.galaxyMat.map.dispose(); this.galaxyMat.dispose(); }
+    if (this.sugLines) this.sugLines.geometry.dispose();
+    if (this.sugMat) this.sugMat.dispose();
     this.renderer.dispose();
     try { this.renderer.forceContextLoss(); } catch { /* ignore */ }
   }
