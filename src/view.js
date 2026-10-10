@@ -11,7 +11,7 @@ const FORCE_KEYS = new Set(['center', 'repel', 'link', 'dist', 'range']);
 const PANEL = [
   ['secForces'], ['center', 0, 5, 0.05], ['range', 60, 2000, 10], ['repel', 0, 20, 0.1], ['link', 0, 1, 0.01], ['dist', 8, 150, 1],
   ['secNodes'], ['nodeSize', 0.3, 3, 0.05], ['dimOthers', 0, 0.6, 0.01], ['degSize', 0, 3, 0.05], ['glow', 0.2, 2.5, 0.05], ['line', 0.2, 3, 0.05],
-  ['secLabels'], ['font', 4, 22, 1], ['fontGrow', 0, 3, 0.05], ['labelFrom', 0, 60, 1], ['boldFrom', 1, 60, 1], ['maxLabels', 0, 200, 5],
+  ['secLabels'], ['font', 2, 10, 0.5], ['fontGrow', 0, 3, 0.05], ['labelFrom', 0, 60, 1], ['boldFrom', 1, 60, 1], ['maxLabels', 0, 200, 5],
 ];
 /* playback speed: vault time per second of playback */
 const TL_RATES = [[1000, 'tlRateSec'], [60000, 'tlRateMin'], [3600000, 'tlRateHour'], [86400000, 'tlRateDay'], [604800000, 'tlRateWeek'], [2592000000, 'tlRateMonth']];
@@ -442,6 +442,10 @@ export class CortexGraphView extends ItemView {
     this.speedSel = spd;
     for (const [v, key] of TL_RATES) spd.createEl('option', { value: String(v), text: t(key) });
     spd.onchange = () => { this.tl.rate = Number(spd.value); };
+    const mul = row1.createEl('select', { cls: 'dropdown', attr: { 'aria-label': t('tlFactor') } });
+    for (const f of [0.1, 0.25, 0.5, 1, 2, 3, 5, 10]) mul.createEl('option', { value: String(f), text: '× ' + String(f).replace('.', ',') });
+    mul.value = '1'; this.tl.factor = 1;
+    mul.onchange = () => { this.tl.factor = Number(mul.value); };
     this.recBtn = row1.createEl('button', { cls: 'cg-time-rec clickable-icon', attr: { 'aria-label': t('tlRecord') } }); setIcon(this.recBtn, 'video');
     this.recBtn.onclick = () => (this.R.rec ? this.finishRecording() : this.startRecording());
     this.tlCount = row1.createSpan({ cls: 'cg-time-count' });
@@ -538,7 +542,7 @@ export class CortexGraphView extends ItemView {
     const step = (ts) => {
       if (!tl.playing) return;
       const dt = (ts - last) / 1000; last = ts;
-      tl.to = Math.min(1, tl.to + dt * tl.rate / Math.max(1, tl.hi - tl.lo));
+      tl.to = Math.min(1, tl.to + dt * tl.rate * (tl.factor || 1) / Math.max(1, tl.hi - tl.lo));
       this.tlTo.rg.value = String(tl.to * 1000);
       this.applyMask();
       if (tl.to >= 1) { this.stopPlay(); if (this.R.rec) window.setTimeout(() => this.finishRecording(), 1500); return; }
