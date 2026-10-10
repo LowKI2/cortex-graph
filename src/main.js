@@ -6,11 +6,11 @@ import { CortexGraphView, VIEW_TYPE, DEFAULT_KEYS, DEFAULT_MOUSE, KEY_ACTIONS } 
 import { t } from './i18n';
 
 export const SHAPES = ['kreis', 'ring', 'stern', 'raute', 'quadrat'];
-const STYLE_DEFAULTS = { shapeSize: 1, shapeGroup: 0.4, hubPull: 0.5, center: 2, repel: 10, link: 1, dist: 32, range: 250, nodeSize: 1, degSize: 1, glow: 1, line: 1,
-  font: 4, fontGrow: 1.45, boldFrom: 15, labelFrom: 4, maxLabels: 150, dimOthers: 0.04, nodeBright: 1, glowBright: 1, shStern: 2, shRaute: 0, shQuadrat: 0, shRing: 0 };
+const STYLE_DEFAULTS = { shapeSize: 1, shapeGroup: 0.4, hubPull: 0.5, center: 2.25, repel: 5.6, link: 0.09, dist: 8, range: 120, nodeSize: 0.35, degSize: 0.75, glow: 1.3, line: 0.7,
+  font: 3, fontGrow: 1.05, boldFrom: 28, labelFrom: 3, maxLabels: 80, dimOthers: 0.1, nodeBright: 0.55, glowBright: 1, shStern: 0, shRaute: 0, shQuadrat: 0, shRing: 0.5 };
 const DEFAULTS = {
   layout: '3d', shape: 'free', background: 'space', colorBy: 'obsidian', filters: true, orphans: false, labels: true, rotate: true,
-  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], folderLinks: 'hidden', rankBy: 'auto', recSave: 'ask', focusCamera: true, staleDays: 90, shapeDefault: 'kreis', hubStars: true, folderShapes: {}, noteShapes: {}, noteWeights: {}, claudeLive: true, galaxies: true, views: [], style: Object.assign({}, STYLE_DEFAULTS),
+  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], folderLinks: 'hidden', rankBy: 'auto', recSave: 'ask', focusCamera: true, staleDays: 90, shapeDefault: 'kreis', hubStars: false, folderShapes: {}, noteShapes: {}, noteWeights: {}, claudeLive: true, galaxies: true, views: [], style: Object.assign({}, STYLE_DEFAULTS),
 };
 
 export default class CortexGraphPlugin extends Plugin {

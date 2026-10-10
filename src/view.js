@@ -21,7 +21,7 @@ const TL_RATES = [[1000, 'tlRateSec'], [60000, 'tlRateMin'], [3600000, 'tlRateHo
 export const KEY_ACTIONS = ['zin', 'zout', 'up', 'down', 'left', 'right', 'rl', 'rr', 'tu', 'td', 'fit', 'names', 'search'];
 export const DEFAULT_KEYS = { zin: ['+', '='], zout: ['-', ''], up: ['ArrowUp', 'w'], down: ['ArrowDown', 's'], left: ['ArrowLeft', 'a'], right: ['ArrowRight', 'd'],
   rl: ['q', ''], rr: ['e', ''], tu: ['PageUp', 'r'], td: ['PageDown', 'v'], fit: ['0', 'f'], names: ['n', ''], search: ['/', ''] };
-export const DEFAULT_MOUSE = { left: 'rotate', right: 'pan', middle: 'pan', shift: 'link', invert: false, rotSpeed: 1, rotPause: 1 };
+export const DEFAULT_MOUSE = { left: 'pan', right: 'pan', middle: 'rotate', shift: 'link', invert: false, rotSpeed: 1, rotPause: 1 };
 const KEY_NAMES = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', ' ': 'Space', PageUp: 'PgUp', PageDown: 'PgDn', Home: 'Pos1', End: 'Ende', Insert: 'Einfg' };
 const normKey = (k) => (k && k.length === 1 ? k.toLowerCase() : k);
 const keyLabel = (k) => (!k ? '·' : KEY_NAMES[k] || (k.length === 1 ? k.toUpperCase() : k));
@@ -1173,6 +1173,8 @@ export class CortexGraphView extends ItemView {
     const cur = Math.min(GROUPS.length - 1, Math.max(0, this.plugin.settings.panelTab || 0));
     const show = (g) => {
       pages.forEach((pg, k) => pg.toggle(GROUPS[g][1].includes(k)));
+      const wide = GROUPS[g][0] === 'tabControls';   // keyboard and mouse side by side
+      this.panelBody.toggleClass('cg-two-col', wide); this.panel.toggleClass('is-wide', wide);
       bar.querySelectorAll('.cg-tab').forEach((x, j) => x.toggleClass('is-active', j === g));
     };
     pages.forEach((pg) => pg.addClass('cg-tabpage'));
