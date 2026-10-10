@@ -124,6 +124,9 @@ function shapeSetup() {
     if (P.shape === 'brain') {
       const l = LOBES[g % LOBES.length], deep = g % LOBES.length >= 4 && g % LOBES.length <= 5;
       targets.push([l[0] * R, l[1] * R, d3 && !deep ? (g % 2 ? 0.25 : -0.25) * R : 0]);
+    } else if (P.shape === 'triangle' && d3) { // pyramid: each top folder towards its own base corner
+      const a = (g / Math.max(1, ng)) * Math.PI * 2;
+      targets.push([Math.cos(a) * 0.55 * R, NaN, Math.sin(a) * 0.55 * R]);
     } else {
       const a = -Math.PI / 2 + (g / Math.max(1, ng)) * Math.PI * 2;
       targets.push([Math.cos(a) * 0.5 * R, -Math.sin(a) * 0.5 * R, 0]);
@@ -141,11 +144,17 @@ function inside(px, py, pz) {
     const h = R * 0.85, cx = Math.max(-h, Math.min(h, px)), cy = Math.max(-h, Math.min(h, py)), cz = Math.max(-h, Math.min(h, pz));
     return cx === px && cy === py && cz === pz ? null : [cx, cy, cz];
   }
-  if (sh === 'triangle') { // 2D: triangle tip up; 3D: square pyramid
+  if (sh === 'triangle') { // 2D: triangle tip up; 3D: pyramid whose base has one corner per top-level folder
     const top = R * 0.95, bot = -R * 0.65, cy = Math.max(bot, Math.min(top, py));
     const w = R * 0.95 * (top - cy) / (top - bot);
-    const cx = Math.max(-w, Math.min(w, px)), cz = d3 ? Math.max(-w, Math.min(w, pz)) : 0;
-    return cx === px && cy === py && (!d3 || cz === pz) ? null : [cx, cy, cz];
+    if (!d3) { const cx = Math.max(-w, Math.min(w, px)); return cx === px && cy === py ? null : [cx, cy, 0]; }
+    const k = Math.max(3, Math.min(12, P.ngroups || 4)), ap = w * Math.cos(Math.PI / k);
+    let qx = px, qz = pz, out = cy !== py;
+    for (let it = 0; it < 2; it++) for (let e = 0; e < k; e++) {
+      const a = (e + 0.5) * 2 * Math.PI / k, nx = Math.cos(a), nz = Math.sin(a), dd = qx * nx + qz * nz - ap;
+      if (dd > 0) { qx -= nx * dd; qz -= nz * dd; out = true; }
+    }
+    return out ? [qx, cy, qz] : null;
   }
   if (sh === 'brain') {
     let best = null, bd = Infinity;
@@ -174,7 +183,7 @@ function applyShape() {
   const GK = 0.08 * (P.shapeGroup == null ? 0.4 : P.shapeGroup) * alpha, d3 = dim === 3;
   for (let i = 0; i < n; i++) {
     const g = groups ? groups[i] : -1;
-    if (GK > 0 && g >= 0 && targets[g]) { const t = targets[g]; vx[i] += (t[0] - x[i]) * GK; vy[i] += (t[1] - y[i]) * GK; if (d3) vz[i] += (t[2] - z[i]) * GK; }
+    if (GK > 0 && g >= 0 && targets[g]) { const t = targets[g]; vx[i] += (t[0] - x[i]) * GK; if (!Number.isNaN(t[1])) vy[i] += (t[1] - y[i]) * GK; if (d3) vz[i] += (t[2] - z[i]) * GK; }
     const nx = x[i] + vx[i], ny = y[i] + vy[i], nz = d3 ? z[i] + vz[i] : 0;
     const q = inside(nx, ny, nz);
     const CK = P.shape === 'triangle' ? 0.12 : 0.35; // softer walls for the pyramid, so it does not form hard faces
