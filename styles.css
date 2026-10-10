@@ -194,14 +194,14 @@
 .cg-sec-wrap .cg-sec { margin-top: 4px; }
 
 /* controls (key/mouse bindings) – third column of the settings panel */
-.cg-panel { width: min(960px, calc(100% - 16px)); }
+.cg-panel { width: min(1240px, calc(100% - 16px)); }
 .cg-panel-body { columns: auto; display: flex; gap: 22px; align-items: flex-start; }
 .cg-pcols { flex: 2 1 540px; min-width: 0; columns: 2 240px; column-gap: 22px; }
-.cg-controls { flex: 1 1 260px; min-width: 240px; }
+.cg-controls { flex: 1 1 250px; min-width: 230px; }
 .cg-root.is-mobile .cg-panel-body { flex-direction: column; }
 .cg-root.is-mobile .cg-pcols { columns: 1; }
 .cg-root.is-mobile .cg-controls { width: 100%; }
-@media (max-width: 900px) { .cg-panel-body { flex-wrap: wrap; } .cg-controls { flex-basis: 100%; } }
+.cg-panel-body { flex-wrap: wrap; }
 .cg-ctrl-sub { margin-top: 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
 .cg-keyrow { margin-top: 3px; }
 .cg-keys { display: flex; gap: 4px; }

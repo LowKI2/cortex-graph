@@ -1097,9 +1097,8 @@ export class CortexGraphView extends ItemView {
 
   fillControls(body) {
     const ps = this.plugin.settings;
-    const box = body.createDiv({ cls: 'cg-controls' });
-    box.createDiv({ cls: 'cg-sec', text: t('secControls') });
-    box.createDiv({ cls: 'cg-ctrl-sub', text: t('ctrlKeyboard') });
+    let box = body.createDiv({ cls: 'cg-controls' });
+    box.createDiv({ cls: 'cg-sec', text: t('ctrlKeyboard') });
     const save = () => { this.plugin.saveSettings(); this.plugin.views().forEach((v) => { if (v.R) v.R.mouse = ps.mouse; }); };
     const btns = [];
     const relabel = () => btns.forEach(({ b, a, i }) => b.setText(keyLabel(ps.keys[a][i])));
@@ -1131,7 +1130,9 @@ export class CortexGraphView extends ItemView {
       }
     }
     relabel();
-    box.createDiv({ cls: 'cg-ctrl-sub', text: t('ctrlMouse') });
+    box.createDiv({ cls: 'cg-ctrl-hint', text: t('ctrlHintKeys') });
+    box = body.createDiv({ cls: 'cg-controls' });
+    box.createDiv({ cls: 'cg-sec', text: t('ctrlMouse') });
     const sel = (label, key, opts) => {
       const row = box.createDiv({ cls: 'cg-row cg-row-check' });
       row.createSpan({ text: t(label) });
@@ -1155,7 +1156,7 @@ export class CortexGraphView extends ItemView {
     const rg = sp.createEl('input', { type: 'range', attr: { min: 0.2, max: 3, step: 0.05 } });
     rg.value = String(ps.mouse.rotSpeed);
     rg.oninput = () => { ps.mouse.rotSpeed = Number(rg.value); out.setText(fmt(ps.mouse.rotSpeed, 0.05)); save(); };
-    box.createDiv({ cls: 'cg-ctrl-hint', text: t('ctrlHint') });
+    box.createDiv({ cls: 'cg-ctrl-hint', text: t('ctrlHintMouse') });
   }
 
   setStyleKey(key, v) {
