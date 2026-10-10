@@ -6,7 +6,7 @@ import {
 } from 'three';
 
 const FLARE_SEG = 4;
-const STYLE_DEFAULT = { nodeSize: 1, degSize: 1, glow: 1, line: 1, taper: 1, font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, rotate: true };
+const STYLE_DEFAULT = { nodeSize: 1, degSize: 1, glow: 1, line: 1, taper: 1, taperBright: 0.6, nodeBright: 1, font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, rotate: true };
 
 function hexToRgb(h) {
   const v = parseInt(String(h).replace('#', '').slice(0, 6), 16) || 0;
@@ -86,7 +86,7 @@ export class GraphRenderer {
 
   glowMaterial(coreAmt, fog) {
     return new ShaderMaterial({
-      uniforms: { uScale: { value: 300 }, uCore: { value: coreAmt }, uMin: { value: fog ? 0.5 : 0.0 }, uGlow: { value: 1.0 }, uSizeK: { value: 1.0 }, uTime: { value: 0 }, uLight: { value: 0 } },
+      uniforms: { uScale: { value: 300 }, uCore: { value: coreAmt }, uMin: { value: fog ? 0.5 : 0.0 }, uGlow: { value: 1.0 }, uSizeK: { value: 1.0 }, uBright: { value: 1.0 }, uTime: { value: 0 }, uLight: { value: 0 } },
       vertexShader: `
         attribute float size; attribute float alpha; attribute vec3 color; attribute float heat; attribute float shape;
         varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape;
@@ -100,7 +100,7 @@ export class GraphRenderer {
         }`,
       fragmentShader: `
         varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape;
-        uniform float uCore; uniform float uGlow; uniform float uSizeK; uniform float uTime; uniform float uLight;
+        uniform float uCore; uniform float uGlow; uniform float uSizeK; uniform float uBright; uniform float uTime; uniform float uLight;
         void main() {
           vec2 c = gl_PointCoord - 0.5;
           float d = length(c) * 2.0;
@@ -122,7 +122,7 @@ export class GraphRenderer {
           // bigger nodes overlap more under additive blending – keep their brightness constant
           float hk = uGlow * uSizeK;
           vec3 col = vColor * (halo * 0.95 * hk + core * 1.1 * sqrt(uSizeK)) + vec3(1.0) * core * uCore * uSizeK;
-          gl_FragColor = vec4(col, clamp(halo * 0.9 * hk + core, 0.0, 1.0) * vAlpha);
+          gl_FragColor = vec4(col * uBright, clamp(halo * 0.9 * hk + core, 0.0, 1.0) * vAlpha * min(1.0, uBright));
         }`,
       transparent: true, depthWrite: false, blending: AdditiveBlending,
     });
@@ -399,7 +399,7 @@ export class GraphRenderer {
     for (let k = 0; k < this.edges.length; k++) {
       for (let e = 0; e < 2; e++) {
         const node = this.edges[k][e], nd = this.nodes[node];
-        const al = nd.anchor ? 0 : Math.min(1, lA[2 * k + e] * 1.6), size = nd.anchor ? 0 : sz[node];
+        const al = nd.anchor ? 0 : Math.min(1, lA[2 * k + e] * (this.style.taperBright != null ? this.style.taperBright : 0.6)), size = nd.anchor ? 0 : sz[node];
         const r = lc[6 * k + 3 * e], g = lc[6 * k + 3 * e + 1], b = lc[6 * k + 3 * e + 2];
         const f = 2 * k + e;
         for (let v = f * V; v < (f + 1) * V; v++) { C[3 * v] = r; C[3 * v + 1] = g; C[3 * v + 2] = b; A[v] = al; Z[v] = size; }
@@ -490,6 +490,7 @@ export class GraphRenderer {
     this.style = Object.assign(this.style, st);
     this.nodeMat.uniforms.uGlow.value = this.style.glow;
     this.nodeMat.uniforms.uSizeK.value = 1 / Math.max(1, this.style.nodeSize);
+    this.nodeMat.uniforms.uBright.value = this.style.nodeBright != null ? this.style.nodeBright : 1;
     this.flareMat.uniforms.uTaper.value = this.style.taper || 0;
     if (this.flares) { const vis = (this.style.taper || 0) > 0, was = this.flares.visible; this.flares.visible = vis; if (vis && !was) this.syncFlares(); }
     this.refreshColors(); this.updateLabels(true);
