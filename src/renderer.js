@@ -533,7 +533,12 @@ export class GraphRenderer {
       const nd = this.nodes[k], z = nd.z || 0;
       if (nd.x < x0) x0 = nd.x; if (nd.x > x1) x1 = nd.x; if (nd.y < y0) y0 = nd.y; if (nd.y > y1) y1 = nd.y; if (z < z0) z0 = z; if (z > z1) z1 = z;
     }
-    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, cz = (z0 + z1) / 2;
+    let cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, cz = (z0 + z1) / 2;
+    if (!list && ks.length > 3) { // whole graph: aim at the weighted core (hubs), not the middle of the bounding box
+      let sw = 0, ax = 0, ay = 0, az = 0;
+      for (const k of ks) { const nd = this.nodes[k]; const w = 1 + 3 * Math.sqrt(Math.max(0, rk(nd)) / (this.maxDeg || 1)); sw += w; ax += nd.x * w; ay += nd.y * w; az += (nd.z || 0) * w; }
+      cx = ax / sw; cy = ay / sw; cz = az / sw;
+    }
     let r = 30;
     for (const k of ks) { const nd = this.nodes[k]; r = Math.max(r, Math.hypot(nd.x - cx, nd.y - cy, (nd.z || 0) - cz)); }
     this.targetGoal.set(cx, cy, cz);

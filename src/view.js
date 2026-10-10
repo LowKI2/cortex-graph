@@ -6,11 +6,11 @@ import SIM_SRC from './sim.worker.js';
 
 export const VIEW_TYPE = 'cortex-graph-view';
 
-export const STYLE_KEYS = ['center', 'repel', 'link', 'dist', 'range', 'nodeSize', 'degSize', 'glow', 'line', 'font', 'fontGrow', 'boldFrom', 'labelFrom', 'maxLabels', 'dimOthers', 'shapeSize', 'shapeGroup', 'taper', 'taperBright', 'nodeBright', 'shStern', 'shRaute', 'shQuadrat', 'shRing'];
+export const STYLE_KEYS = ['center', 'repel', 'link', 'dist', 'range', 'nodeSize', 'degSize', 'glow', 'line', 'font', 'fontGrow', 'boldFrom', 'labelFrom', 'maxLabels', 'dimOthers', 'shapeSize', 'shapeGroup', 'hubPull', 'taper', 'taperBright', 'nodeBright', 'shStern', 'shRaute', 'shQuadrat', 'shRing'];
 const SHAPE_KEYS = new Set(['shStern', 'shRaute', 'shQuadrat', 'shRing']);
-const FORCE_KEYS = new Set(['center', 'repel', 'link', 'dist', 'range', 'shapeSize', 'shapeGroup']);
+const FORCE_KEYS = new Set(['center', 'repel', 'link', 'dist', 'range', 'shapeSize', 'shapeGroup', 'hubPull']);
 const PANEL = [
-  ['secForces'], ['shapeSize', 0.4, 2.5, 0.05], ['shapeGroup', 0, 1, 0.05], ['center', 0, 5, 0.05], ['range', 60, 2000, 10], ['repel', 0, 20, 0.1], ['link', 0, 1, 0.01], ['dist', 8, 150, 1],
+  ['secForces'], ['shapeSize', 0.4, 2.5, 0.05], ['shapeGroup', 0, 1, 0.05], ['hubPull', 0, 1, 0.05], ['center', 0, 5, 0.05], ['range', 60, 2000, 10], ['repel', 0, 20, 0.1], ['link', 0, 1, 0.01], ['dist', 8, 150, 1],
   ['secNodes'], ['nodeSize', 0.3, 3, 0.05], ['dimOthers', 0, 0.6, 0.01], ['degSize', 0, 3, 0.05], ['nodeBright', 0.1, 1.5, 0.05], ['glow', 0, 2.5, 0.05], ['line', 0.2, 3, 0.05], ['taper', 0, 3, 0.05], ['taperBright', 0, 2, 0.05],
   ['secLabels'], ['font', 2, 10, 0.5], ['fontGrow', 0, 3, 0.05], ['labelFrom', 0, 60, 1], ['boldFrom', 1, 60, 1], ['maxLabels', 0, 200, 5],
   ['secShapes'], ['shStern', 0, 25, 0.5], ['shRaute', 0, 25, 0.5], ['shQuadrat', 0, 25, 0.5], ['shRing', 0, 25, 0.5],
@@ -144,7 +144,7 @@ export class CortexGraphView extends ItemView {
   simParams() {
     const ps = this.plugin.settings, s = ps.style, free = this.mode === 'local' || !!this.focusPath;
     return { center: s.center, repel: s.repel, link: s.link, dist: s.dist, range: s.range,
-      shape: free ? 'free' : ps.shape || 'free', shapeSize: s.shapeSize, shapeGroup: s.shapeGroup, ngroups: this.groupCount || 0 };
+      shape: free ? 'free' : ps.shape || 'free', shapeSize: s.shapeSize, shapeGroup: s.shapeGroup, hubPull: s.hubPull, ngroups: this.groupCount || 0 };
   }
 
   /* top-level folder index per node, biggest folder first (for the base form regions) */
@@ -244,6 +244,7 @@ export class CortexGraphView extends ItemView {
     const keepCam = old.size > 0 && have > n * 0.8;
     this.R.setGraph(G.nodes, G.edges, G.adj);
     if (!keepCam) { this.R.resetView(); this.R.fit(true); }
+    if (this.sideView) { this.sideView = false; this.R.yaw = 0; this.R.pitch = 0.08; }
     if (!n) return;
     const alpha0 = have > n * 0.9 ? 0.12 : 1;
     const edges = new Int32Array(G.edges.length * 2);
@@ -259,7 +260,12 @@ export class CortexGraphView extends ItemView {
       if (ev.data.done && focus == null) this.savePositions();
     };
     const groups = this.groupArray();
-    w.postMessage({ cmd: 'init', n, dim: flat ? 2 : 3, edges, pos, groups, params: this.simParams(), alpha: alpha0 });
+    // importance 0..1: hubs are pulled to the middle so the graph grows outward from its core
+    const weights = new Float32Array(n);
+    let wmax = 0;
+    G.nodes.forEach((nd, k) => { const v = nd.anchor || nd.hidden ? 0 : Math.sqrt((nd.rank ?? nd.deg) * (nd.w || 1)); weights[k] = v; if (v > wmax) wmax = v; });
+    if (wmax > 0) for (let k = 0; k < n; k++) weights[k] /= wmax;
+    w.postMessage({ cmd: 'init', n, dim: flat ? 2 : 3, edges, pos, groups, weights, params: this.simParams(), alpha: alpha0 });
   }
 
   savePositions() {
@@ -1116,7 +1122,10 @@ export class CortexGraphView extends ItemView {
       const d = row.createEl('select', { cls: 'dropdown' });
       for (const o of ['free', 'circle', 'triangle', 'square', 'brain']) d.createEl('option', { value: o, text: t('baseShape_' + o) });
       d.value = ps.shape || 'free';
-      d.onchange = () => { ps.shape = d.value; this.plugin.saveSettings(); this.plugin.views().forEach((v) => v.simSend({ cmd: 'params', params: v.simParams() })); };
+      d.onchange = async () => {
+        ps.shape = d.value; await this.plugin.saveSettings();
+        for (const v of this.plugin.views()) { v.sideView = ps.shape === 'brain'; v.relayout(); }
+      };
       secs.secForces.insertBefore(row, secs.secForces.children[1] || null);
     }
     if (secs.secLabels) {

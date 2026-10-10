@@ -32,7 +32,7 @@ Works on **desktop and mobile** (touch controls included).
 - **Review** – highlight notes changed today, since Obsidian started, in the last 7 days or externally.
 - **Faded corners** – notes untouched for a configurable number of days get paler and smaller.
 - **Controls** – keyboard and mouse bindings shown and editable in the panel (two keys per action, drag buttons, wheel direction, rotation speed).
-- **Base form** – keep the whole graph inside a circle/sphere, triangle, square/cube or a brain, with top-level folders gathered in their own regions (brain: one lobe per folder, biggest folder frontal).
+- **Base form** – keep the whole graph inside a circle/sphere, triangle/pyramid, square/cube or a brain (side view), with top-level folders gathered in their own regions (brain: one lobe per folder, biggest folder frontal).
 - **Labels** – choose the font and a glow, shadow or background in the note's folder color.
 - **Look** – separate sliders for node brightness, glow, line thickness and tapered line ends at nodes.
 - **Node shapes** – circle, ring, star, diamond, square: per folder or note (right-click → Appearance…, also sets weight), via the `form` property, or automatically by importance with a percentage slider per shape.

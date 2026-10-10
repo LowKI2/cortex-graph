@@ -4,7 +4,7 @@
                  groups (top-level folder index per node) are pulled to their own region (brain: lobes)
                  params {params} | pin {i,x,y,z} | unpin {i} | reheat {alpha} | stop
    Messages out: {pos:Float32Array, done:boolean} */
-let n = 0, dim = 3, x, y, z, vx, vy, vz, edges, m = 0, bias, str, groups = null;
+let n = 0, dim = 3, x, y, z, vx, vy, vz, edges, m = 0, bias, str, groups = null, weights = null;
 let P = { center: 0.5, repel: 10, link: 1, dist: 32 };
 let alpha = 0, alphaTarget = 0, running = false;
 const pin = new Map();
@@ -105,9 +105,15 @@ function repel(CH, MAXD2) {
 
 // ---------------------------------------------------------------- base form (shape) + folder regions
 // brain: x = front(+)/back(-), y = up, z = left/right; units of R
-const BRAIN = [[0.05, 0.12, -0.27, 1.0, 0.66, 0.42], [0.05, 0.12, 0.27, 1.0, 0.66, 0.42], [-0.62, -0.42, 0, 0.36, 0.22, 0.5], [-0.25, -0.62, 0, 0.12, 0.32, 0.12]];
+// brain seen from the side: x = front(+)/back(-), y = up, z = left/right hemisphere; units of R; [cx,cy,cz, rx,ry,rz, cutBelowY]
+const BRAIN = [
+  [0.0, 0.08, -0.25, 1.0, 0.62, 0.4, -0.18], [0.0, 0.08, 0.25, 1.0, 0.62, 0.4, -0.18], // cerebrum (flat underside)
+  [0.28, -0.22, -0.3, 0.46, 0.22, 0.26], [0.28, -0.22, 0.3, 0.46, 0.22, 0.26],      // temporal lobes hanging below the front half
+  [-0.66, -0.36, 0, 0.32, 0.19, 0.46],                                                  // cerebellum, back bottom
+  [-0.3, -0.6, 0, 0.1, 0.3, 0.1],                                                       // brain stem
+];
 // regions in order of folder size: frontal, parietal, temporal, occipital, cerebellum, brain stem, then in-between areas
-const LOBES = [[0.6, 0.2], [-0.1, 0.5], [0.15, -0.25], [-0.7, 0.15], [-0.62, -0.42], [-0.25, -0.62], [0.3, 0.45], [-0.4, 0.35], [0.45, -0.05], [-0.35, -0.1]];
+const LOBES = [[0.6, 0.25], [-0.15, 0.48], [0.28, -0.24], [-0.72, 0.15], [-0.66, -0.36], [-0.3, -0.62], [0.3, 0.5], [-0.45, 0.38], [0.5, 0.0], [-0.35, 0.05]];
 let R = 0, targets = [];
 function shapeSetup() {
   const d3 = dim === 3, sz = P.shapeSize || 1, DIST = P.dist || 32;
@@ -117,7 +123,7 @@ function shapeSetup() {
   for (let g = 0; g < ng; g++) {
     if (P.shape === 'brain') {
       const l = LOBES[g % LOBES.length], deep = g % LOBES.length >= 4 && g % LOBES.length <= 5;
-      targets.push([l[0] * R, l[1] * R, d3 && !deep ? (g % 2 ? 0.27 : -0.27) * R : 0]);
+      targets.push([l[0] * R, l[1] * R, d3 && !deep ? (g % 2 ? 0.25 : -0.25) * R : 0]);
     } else {
       const a = -Math.PI / 2 + (g / Math.max(1, ng)) * Math.PI * 2;
       targets.push([Math.cos(a) * 0.5 * R, -Math.sin(a) * 0.5 * R, 0]);
@@ -135,24 +141,25 @@ function inside(px, py, pz) {
     const h = R * 0.85, cx = Math.max(-h, Math.min(h, px)), cy = Math.max(-h, Math.min(h, py)), cz = Math.max(-h, Math.min(h, pz));
     return cx === px && cy === py && cz === pz ? null : [cx, cy, cz];
   }
-  if (sh === 'triangle') { // equilateral, tip up; in 3D a prism
-    let qx = px, qy = py, out = false;
-    const rr = R * 1.2;
-    for (let it = 0; it < 3; it++) for (let e = 0; e < 3; e++) {
-      const a = Math.PI / 2 + e * 2 * Math.PI / 3 + Math.PI / 3, nx = Math.cos(a), ny = Math.sin(a), off = rr * 0.5;
-      const dd = qx * nx + qy * ny - off;
-      if (dd > 0) { qx -= nx * dd; qy -= ny * dd; out = true; }
-    }
-    const hz = R * 0.45, qz = Math.max(-hz, Math.min(hz, pz));
-    return out || qz !== pz ? [qx, qy, qz] : null;
+  if (sh === 'triangle') { // 2D: triangle tip up; 3D: square pyramid
+    const top = R * 0.95, bot = -R * 0.65, cy = Math.max(bot, Math.min(top, py));
+    const w = R * 0.95 * (top - cy) / (top - bot);
+    const cx = Math.max(-w, Math.min(w, px)), cz = d3 ? Math.max(-w, Math.min(w, pz)) : 0;
+    return cx === px && cy === py && (!d3 || cz === pz) ? null : [cx, cy, cz];
   }
   if (sh === 'brain') {
-    let best = null, bq = Infinity;
+    let best = null, bd = Infinity;
     for (const b of BRAIN) {
-      const dx = px - b[0] * R, dy = py - b[1] * R, dz = d3 ? pz - b[2] * R : 0;
+      // optional flat cut on the underside, then project onto the ellipsoid
+      const cut = b[6] != null ? b[6] * R : -Infinity;
+      const qy0 = Math.max(cut, py);
+      const dx = px - b[0] * R, dy = qy0 - b[1] * R, dz = d3 ? pz - b[2] * R : 0;
       const q = Math.sqrt((dx / (b[3] * R)) ** 2 + (dy / (b[4] * R)) ** 2 + (d3 ? (dz / (b[5] * R)) ** 2 : 0));
-      if (q <= 1) return null;
-      if (q < bq) { bq = q; best = [b[0] * R + dx / q, b[1] * R + dy / q, d3 ? b[2] * R + dz / q : 0]; }
+      if (q <= 1 && qy0 === py) return null;
+      const s1 = q > 1 ? 1 / q : 1;
+      const c = [b[0] * R + dx * s1, Math.max(cut, b[1] * R + dy * s1), d3 ? b[2] * R + dz * s1 : 0];
+      const dd = (c[0] - px) ** 2 + (c[1] - py) ** 2 + (c[2] - pz) ** 2;
+      if (dd < bd) { bd = dd; best = c; }
     }
     return best;
   }
@@ -167,6 +174,8 @@ function applyShape() {
     const nx = x[i] + vx[i], ny = y[i] + vy[i], nz = d3 ? z[i] + vz[i] : 0;
     const q = inside(nx, ny, nz);
     if (q) { vx[i] += (q[0] - nx) * 0.35; vy[i] += (q[1] - ny) * 0.35; if (d3) vz[i] += (q[2] - nz) * 0.35; }
+    // brain: keep a cleft between the two hemispheres (above the cerebellum/stem)
+    if (d3 && P.shape === 'brain' && ny > -0.2 * R) { const gap = 0.07 * R; if (Math.abs(nz) < gap) vz[i] += ((nz >= 0 ? 1 : -1) * gap - nz) * 0.2; }
   }
 }
 
@@ -195,8 +204,10 @@ function step() {
     vx[a] += dx * (1 - bb); vy[a] += dy * (1 - bb); vz[a] += dz * (1 - bb);
   }
   applyShape();
+  const HB = 0.22 * (P.hubPull == null ? 0.5 : P.hubPull) * alpha;
   for (let i = 0; i < n; i++) {
-    vx[i] -= x[i] * GR; vy[i] -= y[i] * GR; vz[i] -= z[i] * GR;
+    const g = GR + (weights ? HB * weights[i] : 0);
+    vx[i] -= x[i] * g; vy[i] -= y[i] * g; vz[i] -= z[i] * g;
     vx[i] *= DECAY; vy[i] *= DECAY; vz[i] *= DECAY;
     x[i] += vx[i]; y[i] += vy[i]; z[i] = d3 ? z[i] + vz[i] : 0;
   }
@@ -227,7 +238,7 @@ self.onmessage = (e) => {
     x = new Float64Array(n); y = new Float64Array(n); z = new Float64Array(n);
     vx = new Float64Array(n); vy = new Float64Array(n); vz = new Float64Array(n);
     for (let i = 0; i < n; i++) { x[i] = d.pos[3 * i]; y[i] = d.pos[3 * i + 1]; z[i] = dim === 3 ? d.pos[3 * i + 2] : 0; }
-    groups = d.groups || null;
+    groups = d.groups || null; weights = d.weights || null;
     P = Object.assign(P, d.params || {}); prep(); shapeSetup(); pin.clear(); alphaTarget = 0; alpha = 0; kick(d.alpha);
   } else if (d.cmd === 'params') { const was = P.shape; P = Object.assign(P, d.params); shapeSetup(); kick(P.shape !== was ? 0.9 : 0.4); }
   else if (d.cmd === 'pin') { pin.set(d.i, [d.x, d.y, d.z || 0]); x[d.i] = d.x; y[d.i] = d.y; z[d.i] = d.z || 0; alphaTarget = 0.22; kick(0.22); }
