@@ -2,10 +2,11 @@
 import {
   WebGLRenderer, Scene, FogExp2, PerspectiveCamera, Group, BufferGeometry, BufferAttribute, Points, LineSegments,
   ShaderMaterial, LineDashedMaterial, AdditiveBlending, NormalBlending, Vector2, Vector3, Raycaster, Plane, Color,
-  Sprite, SpriteMaterial, CanvasTexture,
+  Sprite, SpriteMaterial, CanvasTexture, Mesh, DoubleSide,
 } from 'three';
 
-const STYLE_DEFAULT = { nodeSize: 1, degSize: 1, glow: 1, line: 1, font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, rotate: true };
+const FLARE_SEG = 4;
+const STYLE_DEFAULT = { nodeSize: 1, degSize: 1, glow: 1, line: 1, taper: 1, font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, rotate: true };
 
 function hexToRgb(h) {
   const v = parseInt(String(h).replace('#', '').slice(0, 6), 16) || 0;
@@ -39,6 +40,32 @@ export class GraphRenderer {
         void main() { vColor = color; vAlpha = alpha; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
       fragmentShader: 'varying vec3 vColor; varying float vAlpha; void main() { gl_FragColor = vec4(vColor, vAlpha); }',
       transparent: true, depthWrite: false, blending: AdditiveBlending,
+    });
+    /* tapered line ends: a short screen-space wedge at each end of an edge, thick at the node, thinning into the line */
+    this.flareMat = new ShaderMaterial({
+      uniforms: { uScale: { value: 300 }, uRes: { value: new Vector2(800, 600) }, uTaper: { value: 1 } },
+      vertexShader: `
+        attribute vec3 aB; attribute float aT; attribute float aSide; attribute float aSize; attribute vec3 color; attribute float alpha;
+        uniform float uScale; uniform vec2 uRes; uniform float uTaper;
+        varying vec3 vColor; varying float vAlpha;
+        void main() {
+          vColor = color;
+          vec4 mvA = modelViewMatrix * vec4(position, 1.0);
+          vec4 cA = projectionMatrix * mvA, cB = projectionMatrix * modelViewMatrix * vec4(aB, 1.0);
+          if (cA.w <= 0.0 || cB.w <= 0.0 || aSize <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vAlpha = 0.0; return; }
+          vec2 sA = cA.xy / cA.w * 0.5 * uRes, sB = cB.xy / cB.w * 0.5 * uRes;
+          vec2 d = sB - sA; float segLen = length(d);
+          if (segLen < 1.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vAlpha = 0.0; return; }
+          d /= segLen; vec2 nrm = vec2(-d.y, d.x);
+          float px = aSize * uScale / -mvA.z;              // node diameter in device pixels
+          float len = min(px * (0.45 + 0.35 * uTaper), segLen * 0.45);
+          float hw = max(0.5, px * 0.075 * uTaper * pow(1.0 - aT, 1.7));
+          vec2 sP = sA + d * len * aT + nrm * aSide * hw;
+          gl_Position = vec4(sP / (0.5 * uRes) * cA.w, cA.z, cA.w);
+          vAlpha = alpha * pow(1.0 - aT, 0.8);
+        }`,
+      fragmentShader: 'varying vec3 vColor; varying float vAlpha; void main() { gl_FragColor = vec4(vColor, vAlpha); }',
+      transparent: true, depthWrite: false, blending: AdditiveBlending, side: DoubleSide,
     });
     this.makeStars();
     this.nodes = []; this.edges = []; this.adj = []; this.points = null; this.lines = null;
@@ -129,7 +156,7 @@ export class GraphRenderer {
     this.scene.fog = new FogExp2(new Color(bg).getHex(), space ? 0.0009 : 0.0004);
     this.stars.visible = space;
     const blend = this.light ? NormalBlending : AdditiveBlending;
-    this.nodeMat.blending = blend; this.lineMat.blending = blend;
+    this.nodeMat.blending = blend; this.lineMat.blending = blend; this.flareMat.blending = blend; this.flareMat.needsUpdate = true;
     this.nodeMat.uniforms.uLight.value = this.light ? 1 : 0;
     this.nodeMat.needsUpdate = true; this.lineMat.needsUpdate = true;
     if (this.points) this.paint();
@@ -141,6 +168,7 @@ export class GraphRenderer {
     this.maxDeg = Math.max(1, ...nodes.filter((nd) => !nd.hidden && !nd.anchor).map(rk));
     if (this.points) { this.root.remove(this.points); this.points.geometry.dispose(); }
     if (this.lines) { this.root.remove(this.lines); this.lines.geometry.dispose(); }
+    if (this.flares) { this.root.remove(this.flares); this.flares.geometry.dispose(); this.flares = null; }
     const n = nodes.length;
     const pos = new Float32Array(n * 3);
     for (let k = 0; k < n; k++) { const nd = nodes[k]; pos[3 * k] = nd.x || 0; pos[3 * k + 1] = nd.y || 0; pos[3 * k + 2] = nd.z || 0; }
@@ -158,6 +186,7 @@ export class GraphRenderer {
     lg.setAttribute('color', new BufferAttribute(new Float32Array(m * 6), 3));
     lg.setAttribute('alpha', new BufferAttribute(new Float32Array(m * 2), 1));
     this.lines = new LineSegments(lg, this.lineMat); this.lines.frustumCulled = false; this.root.add(this.lines);
+    this.buildFlares(m);
     this.heat = new Float32Array(n);
     this.flashes = new Map();
     this.applyShapes();
@@ -325,6 +354,59 @@ export class GraphRenderer {
     this.paint(); this.updateLabels(true);
   }
 
+  buildFlares(m) {
+    const S = FLARE_SEG, V = 2 * (S + 1), F = 2 * m, nv = F * V;
+    const g = new BufferGeometry();
+    const t = new Float32Array(nv), side = new Float32Array(nv);
+    for (let f = 0; f < F; f++) for (let i = 0; i <= S; i++) for (let j = 0; j < 2; j++) { const v = f * V + 2 * i + j; t[v] = i / S; side[v] = j ? 1 : -1; }
+    const idx = new Uint32Array(F * S * 6);
+    let q = 0;
+    for (let f = 0; f < F; f++) for (let i = 0; i < S; i++) {
+      const v = f * V + 2 * i;
+      idx[q++] = v; idx[q++] = v + 1; idx[q++] = v + 2; idx[q++] = v + 1; idx[q++] = v + 3; idx[q++] = v + 2;
+    }
+    g.setIndex(new BufferAttribute(idx, 1));
+    g.setAttribute('position', new BufferAttribute(new Float32Array(nv * 3), 3));
+    g.setAttribute('aB', new BufferAttribute(new Float32Array(nv * 3), 3));
+    g.setAttribute('aT', new BufferAttribute(t, 1));
+    g.setAttribute('aSide', new BufferAttribute(side, 1));
+    g.setAttribute('aSize', new BufferAttribute(new Float32Array(nv), 1));
+    g.setAttribute('color', new BufferAttribute(new Float32Array(nv * 3), 3));
+    g.setAttribute('alpha', new BufferAttribute(new Float32Array(nv), 1));
+    this.flares = new Mesh(g, this.flareMat); this.flares.frustumCulled = false; this.root.add(this.flares);
+    this.flares.visible = (this.style.taper || 0) > 0;
+  }
+
+  syncFlares() {
+    if (!this.flares || !this.flares.visible) return;
+    const ga = this.flares.geometry.attributes, P = ga.position.array, B = ga.aB.array, nodes = this.nodes, V = 2 * (FLARE_SEG + 1);
+    for (let k = 0; k < this.edges.length; k++) {
+      const a = nodes[this.edges[k][0]], b = nodes[this.edges[k][1]];
+      const ax = a.x, ay = a.y, az = a.z || 0, bx = b.x, by = b.y, bz = b.z || 0;
+      let o = 2 * k * V * 3;
+      for (let v = 0; v < V; v++, o += 3) { P[o] = ax; P[o + 1] = ay; P[o + 2] = az; B[o] = bx; B[o + 1] = by; B[o + 2] = bz; }
+      for (let v = 0; v < V; v++, o += 3) { P[o] = bx; P[o + 1] = by; P[o + 2] = bz; B[o] = ax; B[o + 1] = ay; B[o + 2] = az; }
+    }
+    ga.position.needsUpdate = true; ga.aB.needsUpdate = true;
+  }
+
+  paintFlares() {
+    if (!this.flares || !this.flares.visible) return;
+    const ga = this.flares.geometry.attributes, C = ga.color.array, A = ga.alpha.array, Z = ga.aSize.array;
+    const la = this.lines.geometry.attributes, lc = la.color.array, lA = la.alpha.array, sz = this.points.geometry.attributes.size.array;
+    const V = 2 * (FLARE_SEG + 1);
+    for (let k = 0; k < this.edges.length; k++) {
+      for (let e = 0; e < 2; e++) {
+        const node = this.edges[k][e], nd = this.nodes[node];
+        const al = nd.anchor ? 0 : Math.min(1, lA[2 * k + e] * 1.6), size = nd.anchor ? 0 : sz[node];
+        const r = lc[6 * k + 3 * e], g = lc[6 * k + 3 * e + 1], b = lc[6 * k + 3 * e + 2];
+        const f = 2 * k + e;
+        for (let v = f * V; v < (f + 1) * V; v++) { C[3 * v] = r; C[3 * v + 1] = g; C[3 * v + 2] = b; A[v] = al; Z[v] = size; }
+      }
+    }
+    ga.color.needsUpdate = true; ga.alpha.needsUpdate = true; ga.aSize.needsUpdate = true;
+  }
+
   syncLines() {
     if (!this.lines) return;
     const lp = this.lines.geometry.attributes.position.array, nodes = this.nodes;
@@ -334,6 +416,7 @@ export class GraphRenderer {
       lp[6 * k + 3] = b.x; lp[6 * k + 4] = b.y; lp[6 * k + 5] = b.z || 0;
     }
     this.lines.geometry.attributes.position.needsUpdate = true;
+    this.syncFlares();
     if (this.sugLines && (this.sugTick = (this.sugTick || 0) + 1) % 3 === 0) this.syncSuggest();
   }
 
@@ -399,12 +482,15 @@ export class GraphRenderer {
       lA[2 * k] = lA[2 * k + 1] = Math.min(1, alpha * w);
     }
     la.color.needsUpdate = true; la.alpha.needsUpdate = true;
+    this.paintFlares();
   }
 
   setStyle(st) {
     this.style = Object.assign(this.style, st);
     this.nodeMat.uniforms.uGlow.value = this.style.glow;
     this.nodeMat.uniforms.uSizeK.value = 1 / Math.max(1, this.style.nodeSize);
+    this.flareMat.uniforms.uTaper.value = this.style.taper || 0;
+    if (this.flares) { const vis = (this.style.taper || 0) > 0, was = this.flares.visible; this.flares.visible = vis; if (vis && !was) this.syncFlares(); }
     this.refreshColors(); this.updateLabels(true);
   }
 
@@ -463,6 +549,8 @@ export class GraphRenderer {
     this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
     this.nodeMat.uniforms.uScale.value = h * this.renderer.getPixelRatio() * 0.55;
     this.starMat.uniforms.uScale.value = h * this.renderer.getPixelRatio() * 0.55;
+    this.flareMat.uniforms.uScale.value = h * this.renderer.getPixelRatio() * 0.55;
+    this.flareMat.uniforms.uRes.value.set(w * this.renderer.getPixelRatio(), h * this.renderer.getPixelRatio());
     if (!this.userMoved) this.fit(true);
   }
 
@@ -740,8 +828,8 @@ export class GraphRenderer {
     window.cancelAnimationFrame(this.raf);
     (this.unbind || []).forEach((f) => f());
     if (!this.active) return;
-    for (const o of [this.points, this.lines, this.stars]) if (o) o.geometry.dispose();
-    this.nodeMat.dispose(); this.lineMat.dispose(); this.starMat.dispose();
+    for (const o of [this.points, this.lines, this.stars, this.flares]) if (o) o.geometry.dispose();
+    this.nodeMat.dispose(); this.lineMat.dispose(); this.starMat.dispose(); this.flareMat.dispose();
     if (this.galaxyMat) { this.galaxyMat.map.dispose(); this.galaxyMat.dispose(); }
     if (this.sugLines) this.sugLines.geometry.dispose();
     if (this.sugMat) this.sugMat.dispose();
