@@ -441,11 +441,11 @@ export class CortexGraphView extends ItemView {
     const spd = row1.createEl('select', { cls: 'dropdown', attr: { 'aria-label': t('tlSpeed') } });
     this.speedSel = spd;
     for (const [v, key] of TL_RATES) spd.createEl('option', { value: String(v), text: t(key) });
-    spd.onchange = () => { this.tl.rate = Number(spd.value); };
+    spd.onchange = () => { this.tl.rate = Number(spd.value); this.restartIfPlaying(); };
     const mul = row1.createEl('select', { cls: 'dropdown', attr: { 'aria-label': t('tlFactor') } });
     for (const f of [0.1, 0.25, 0.5, 1, 2, 3, 5, 10]) mul.createEl('option', { value: String(f), text: '× ' + String(f).replace('.', ',') });
     mul.value = '1'; this.tl.factor = 1;
-    mul.onchange = () => { this.tl.factor = Number(mul.value); };
+    mul.onchange = () => { this.tl.factor = Number(mul.value); this.restartIfPlaying(); };
     this.recBtn = row1.createEl('button', { cls: 'cg-time-rec clickable-icon', attr: { 'aria-label': t('tlRecord') } }); setIcon(this.recBtn, 'circle');
     this.recBtn.onclick = () => (this.R.rec ? this.finishRecording() : this.startRecording());
     this.tlCount = row1.createSpan({ cls: 'cg-time-count' });
@@ -532,6 +532,14 @@ export class CortexGraphView extends ItemView {
     const fmt = (v) => moment(v).format(tl.hi - tl.lo < 4 * 86400000 ? 'DD.MM. HH:mm' : 'DD.MM.YYYY');
     this.tlFrom.out.setText(fmt(a)); this.tlTo.out.setText(fmt(b));
     this.tlCount.setText(set.size + ' ' + t('notes'));
+  }
+
+  /* changing speed while playing starts the playback over from "From" */
+  restartIfPlaying() {
+    const tl = this.tl;
+    if (!tl.playing) return;
+    tl.to = tl.from; this.tlTo.rg.value = String(tl.to * 1000);
+    this.applyMask();
   }
 
   startPlay() {
