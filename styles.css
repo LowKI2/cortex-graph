@@ -192,3 +192,17 @@
 .cg-panel { bottom: auto; max-height: calc(100% - 56px); }
 .cg-sec-wrap { display: inline-block; width: 100%; margin-bottom: 10px; }
 .cg-sec-wrap .cg-sec { margin-top: 4px; }
+
+/* controls (key/mouse bindings) */
+.cg-sec-toggle { cursor: pointer; display: flex; align-items: center; gap: 4px; user-select: none; }
+.cg-chev { display: inline-flex; transition: transform .15s; }
+.cg-chev svg { width: 14px; height: 14px; }
+.cg-controls.is-open .cg-chev { transform: rotate(90deg); }
+.cg-ctrl-body { display: none; }
+.cg-controls.is-open .cg-ctrl-body { display: block; }
+.cg-ctrl-sub { margin-top: 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
+.cg-keyrow { margin-top: 3px; }
+.cg-keys { display: flex; gap: 4px; }
+.cg-key { min-width: 46px; height: 24px; padding: 0 6px; font-size: var(--font-ui-smaller); font-family: var(--font-monospace); }
+.cg-key.is-capturing { outline: 2px solid var(--interactive-accent); }
+.cg-ctrl-hint { margin-top: 8px; font-size: var(--font-ui-smaller); color: var(--text-faint); }

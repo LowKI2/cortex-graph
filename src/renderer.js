@@ -537,9 +537,13 @@ export class GraphRenderer {
       canvas.setPointerCapture(e.pointerId);
       const [x, y] = rect(e); ptr.set(e.pointerId, { x, y });
       const under = this.pick(x, y);
-      const linkMode = e.shiftKey && e.button === 0 && under >= 0 && !!this.nodes[under].note && !!this.onLink;
-      const panMode = !linkMode && (e.button === 2 || e.button === 1 || e.shiftKey);
-      if (ptr.size === 1) gest = { t: Date.now(), x0: x, y0: y, moved: 0, drag: panMode || linkMode ? -1 : under, pan: panMode, link: linkMode ? under : -1, btn: e.button, ev: e };
+      const m = this.mouse || {};
+      const shiftAct = m.shift || 'link';
+      const linkMode = e.shiftKey && e.button === 0 && shiftAct === 'link' && under >= 0 && !!this.nodes[under].note && !!this.onLink;
+      const nodeDrag = !e.shiftKey && e.button === 0 && e.pointerType !== 'touch' ? under : e.pointerType === 'touch' ? under : -1;
+      const act = e.button === 0 ? m.left || 'rotate' : e.button === 2 ? m.right || 'pan' : m.middle || 'pan';
+      const panMode = !linkMode && (e.shiftKey && e.button === 0 ? true : act === 'pan');
+      if (ptr.size === 1) gest = { t: Date.now(), x0: x, y0: y, moved: 0, drag: linkMode || nodeDrag < 0 ? -1 : nodeDrag, pan: panMode, link: linkMode ? under : -1, btn: e.button, ev: e };
       else if (gest) { if (this.dragK >= 0 && this.onDragEnd) this.onDragEnd(this.dragK); this.dragK = -1; gest.moved = 999; gest.drag = -1; }
       this.lastInteract = Date.now();
       this.setHover(-1);
@@ -570,7 +574,7 @@ export class GraphRenderer {
           const upv = new Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1);
           this.target.addScaledVector(right, -(x - p.x) * f).addScaledVector(upv, (y - p.y) * f); this.targetGoal.copy(this.target);
         } else {
-          this.yaw -= (x - p.x) * 0.006; this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch + (y - p.y) * 0.006));
+          const rs = 0.006 * ((this.mouse && this.mouse.rotSpeed) || 1); this.yaw -= (x - p.x) * rs; this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch + (y - p.y) * rs));
         }
       } else if (ptr.size === 2) {
         const ids = [...ptr.keys()]; const o = ptr.get(ids[0] === e.pointerId ? ids[1] : ids[0]);
@@ -617,7 +621,7 @@ export class GraphRenderer {
     });
     on('wheel', (e) => {
       e.preventDefault();
-      this.distGoal = this.dist = Math.max(30, Math.min(12000, this.dist * (e.deltaY > 0 ? 1.12 : 1 / 1.12)));
+      this.distGoal = this.dist = Math.max(30, Math.min(12000, this.dist * ((e.deltaY > 0) !== !!(this.mouse && this.mouse.invert) ? 1.12 : 1 / 1.12)));
       this.userMoved = true; this.lastInteract = Date.now();
     }, { passive: false });
   }

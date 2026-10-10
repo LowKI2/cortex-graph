@@ -31,7 +31,8 @@ Works on **desktop and mobile** (touch controls included).
 - **Live activity** – notes changed outside the editor (e.g. by an AI agent via MCP or CLI) flash orange; tools can also log reads/writes to `.cortex/activity.jsonl` (`{"op":"read","path":"..."}` per line) to make reads visible.
 - **Review** – highlight notes changed today, since Obsidian started, in the last 7 days or externally.
 - **Faded corners** – notes untouched for a configurable number of days get paler and smaller.
-- **Node shapes** – circle, ring, star, diamond, square per folder, per note (`form` property) or automatically (stars for the most important notes).
+- **Controls** – keyboard and mouse bindings shown and editable in the panel (two keys per action, drag buttons, wheel direction, rotation speed).
+- **Node shapes** – circle, ring, star, diamond, square: per folder or note (right-click → Appearance…, also sets weight), via the `form` property, or automatically by importance with a percentage slider per shape.
 - **Camera focus** – a click flies to the note; a click on empty space returns to the previous view.
 - **Automatic priority** – names and font sizes follow the importance of a note, not just its link count: links across projects and areas count fully, links inside one project (e.g. chapters of a split document) only a little. A `priority` property (1–5 or low/medium/high) and folder weights refine it.
 - **Folder appearance** – right-click a folder: pick its color and weight (normal, important, primary). Primary folders get bigger nodes and names regardless of links.

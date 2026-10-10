@@ -1,15 +1,15 @@
 import { Plugin, PluginSettingTab, Setting, FuzzySuggestModal, TFolder, TFile, debounce, getAllTags } from 'obsidian';
 import { parseGraphCfg } from './model';
 import { FolderColors } from './folders';
-import { CortexGraphView, VIEW_TYPE } from './view';
+import { CortexGraphView, VIEW_TYPE, DEFAULT_KEYS, DEFAULT_MOUSE, KEY_ACTIONS } from './view';
 import { t } from './i18n';
 
 export const SHAPES = ['kreis', 'ring', 'stern', 'raute', 'quadrat'];
 const STYLE_DEFAULTS = { center: 2, repel: 10, link: 1, dist: 32, range: 250, nodeSize: 1, degSize: 1, glow: 1, line: 1,
-  font: 4, fontGrow: 1.45, boldFrom: 15, labelFrom: 4, maxLabels: 150, dimOthers: 0.04 };
+  font: 4, fontGrow: 1.45, boldFrom: 15, labelFrom: 4, maxLabels: 150, dimOthers: 0.04, shStern: 2, shRaute: 0, shQuadrat: 0, shRing: 0 };
 const DEFAULTS = {
   layout: '3d', background: 'space', colorBy: 'obsidian', filters: true, orphans: false, labels: true, rotate: true,
-  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], folderLinks: 'hidden', rankBy: 'auto', recSave: 'ask', focusCamera: true, staleDays: 90, shapeDefault: 'kreis', hubStars: true, folderShapes: {}, claudeLive: true, galaxies: true, views: [], style: Object.assign({}, STYLE_DEFAULTS),
+  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], folderLinks: 'hidden', rankBy: 'auto', recSave: 'ask', focusCamera: true, staleDays: 90, shapeDefault: 'kreis', hubStars: true, folderShapes: {}, noteShapes: {}, noteWeights: {}, claudeLive: true, galaxies: true, views: [], style: Object.assign({}, STYLE_DEFAULTS),
 };
 
 export default class CortexGraphPlugin extends Plugin {
@@ -52,8 +52,11 @@ export default class CortexGraphPlugin extends Plugin {
     this.registerEvent(this.app.metadataCache.on('resolved', () => this.fc.requestRefresh()));
     this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => this.fc.addMenu(menu, file)));
     this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
-      if (!(file instanceof TFolder)) return;
       let changed = false;
+      for (const m of [this.settings.noteShapes, this.settings.noteWeights]) {
+        for (const k of Object.keys(m)) if (k === oldPath || k.startsWith(oldPath + '/')) { m[file.path + k.slice(oldPath.length)] = m[k]; delete m[k]; changed = true; }
+      }
+      if (!(file instanceof TFolder)) { if (changed) this.saveSettings(); return; }
       for (const fc of [this.settings.folderColors, this.settings.folderWeights, this.settings.folderShapes]) {
         for (const k of Object.keys(fc)) if (k === oldPath || k.startsWith(oldPath + '/')) { fc[file.path + k.slice(oldPath.length)] = fc[k]; delete fc[k]; changed = true; }
       }
@@ -139,12 +142,22 @@ export default class CortexGraphPlugin extends Plugin {
     this.settings.folderColors = Object.assign({}, d.folderColors || {});
     this.settings.folderWeights = Object.assign({}, d.folderWeights || {});
     this.settings.folderShapes = Object.assign({}, d.folderShapes || {});
+    this.settings.noteShapes = Object.assign({}, d.noteShapes || {});
+    this.settings.noteWeights = Object.assign({}, d.noteWeights || {});
     this.settings.hiddenFolders = Array.isArray(d.hiddenFolders) ? d.hiddenFolders.slice() : [];
     this.settings.views = Array.isArray(d.views) ? d.views.slice() : [];
     this.settings.style = Object.assign({}, STYLE_DEFAULTS, d.style || {});
+    this.settings.keys = {};
+    for (const a of KEY_ACTIONS) this.settings.keys[a] = (d.keys && Array.isArray(d.keys[a]) ? d.keys[a] : DEFAULT_KEYS[a]).slice(0, 2);
+    this.settings.mouse = Object.assign({}, DEFAULT_MOUSE, d.mouse || {});
   }
   async saveSettings() { await this.saveData(this.settings); }
-  resetStyle() { this.settings.style = Object.assign({}, STYLE_DEFAULTS); this.saveSettings(); }
+  resetStyle() {
+    this.settings.style = Object.assign({}, STYLE_DEFAULTS);
+    this.settings.keys = {}; for (const a of KEY_ACTIONS) this.settings.keys[a] = DEFAULT_KEYS[a].slice();
+    Object.assign(this.settings.mouse, DEFAULT_MOUSE);
+    this.saveSettings();
+  }
 
   views() { return this.app.workspace.getLeavesOfType(VIEW_TYPE).map((l) => l.view).filter((v) => v instanceof CortexGraphView); }
   activeGraph() { const v = this.app.workspace.getActiveViewOfType(CortexGraphView); return v || this.views()[0] || null; }
@@ -231,7 +244,7 @@ class CortexGraphSettingTab extends PluginSettingTab {
     new Setting(el).setName(t('sLabels')).addToggle((tg) => tg.setValue(s.labels).onChange((v) => { s.labels = v; save('style'); p.views().forEach((w) => w.updateToolbar()); }));
     new Setting(el).setName(t('sRotate')).addToggle((tg) => tg.setValue(s.rotate).onChange((v) => { s.rotate = v; save('style'); }));
     new Setting(el).setName(t('sShapeDefault')).setDesc(t('sShapeDesc')).addDropdown((d) => { for (const k of SHAPES) d.addOption(k, t('shape_' + k)); d.setValue(s.shapeDefault).onChange((v) => { s.shapeDefault = v; save('data'); }); });
-    new Setting(el).setName(t('sHubStars')).addToggle((tg) => tg.setValue(s.hubStars).onChange((v) => { s.hubStars = v; save('data'); }));
+    new Setting(el).setName(t('autoShapes')).setDesc(t('autoShapesDesc')).addToggle((tg) => tg.setValue(s.hubStars).onChange((v) => { s.hubStars = v; save('data'); }));
     new Setting(el).setName(t('sStale')).setDesc(t('sStaleDesc')).addSlider((sl) => sl.setLimits(0, 365, 5).setValue(s.staleDays).setDynamicTooltip()
       .onChange((v) => { s.staleDays = v; save('heat'); }));
     new Setting(el).setName(t('sBehavior')).setHeading();

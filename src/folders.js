@@ -1,5 +1,5 @@
 /* Cortex Graph – folder colors: colors the file explorer like the graph and lets you pick a color per folder. */
-import { Modal, Setting, TFolder, debounce } from 'obsidian';
+import { Modal, Setting, TFolder, TFile, debounce } from 'obsidian';
 import { PALETTE, DEFAULT_COLOR, assignColors } from './model';
 import { t } from './i18n';
 
@@ -96,6 +96,10 @@ export class FolderColors {
   }
 
   addMenu(menu, file) {
+    if (file instanceof TFile && file.extension === 'md') {
+      menu.addItem((i) => i.setTitle(t('noteStyle')).setIcon('shapes').onClick(() => new NoteStyleModal(this.plugin, file.path).open()));
+      return;
+    }
     if (!(file instanceof TFolder) || file.isRoot()) return;
     menu.addItem((i) => i.setTitle(t('folderColor')).setIcon('palette').onClick(() => new FolderColorModal(this, file.path).open()));
     const hid = this.plugin.settings.hiddenFolders || (this.plugin.settings.hiddenFolders = []);
@@ -143,6 +147,35 @@ class FolderColorModal extends Modal {
     new Setting(contentEl)
       .addButton((b) => b.setButtonText(t('reset')).onClick(async () => { await saveShape(''); await this.fc.setStyle(this.path, null, 1); this.close(); }))
       .addButton((b) => b.setButtonText(t('apply')).setCta().onClick(async () => { await saveShape(shape); await this.fc.setStyle(this.path, custom ? pick : null, weight); this.close(); }));
+  }
+  onClose() { this.contentEl.empty(); }
+}
+
+class NoteStyleModal extends Modal {
+  constructor(plugin, path) { super(plugin.app); this.plugin = plugin; this.path = path; }
+  onOpen() {
+    const s = this.plugin.settings;
+    const shapes = s.noteShapes || (s.noteShapes = {}), weights = s.noteWeights || (s.noteWeights = {});
+    let shape = shapes[this.path] || '', weight = weights[this.path] || 1;
+    this.titleEl.setText(t('folderColorTitle', this.path.replace(/\.md$/, '')));
+    new Setting(this.contentEl).setName(t('folderShape')).setDesc(t('noteShapeDesc')).addDropdown((d) => {
+      d.addOption('', t('shape_auto'));
+      for (const k of ['kreis', 'ring', 'stern', 'raute', 'quadrat']) d.addOption(k, t('shape_' + k));
+      d.setValue(shape).onChange((v) => { shape = v; });
+    });
+    new Setting(this.contentEl).setName(t('folderWeight')).setDesc(t('noteWeightDesc')).addDropdown((d) => d
+      .addOption('1', t('weightNormal')).addOption('1.6', t('weightImportant')).addOption('2.4', t('weightPrimary'))
+      .setValue(String(weight)).onChange((v) => { weight = Number(v); }));
+    const save = async (sh, w) => {
+      if (sh) shapes[this.path] = sh; else delete shapes[this.path];
+      if (w && w !== 1) weights[this.path] = w; else delete weights[this.path];
+      await this.plugin.saveSettings();
+      this.plugin.refreshViews('data');
+      this.close();
+    };
+    new Setting(this.contentEl)
+      .addButton((b) => b.setButtonText(t('reset')).onClick(() => save('', 1)))
+      .addButton((b) => b.setButtonText(t('apply')).setCta().onClick(() => save(shape, weight)));
   }
   onClose() { this.contentEl.empty(); }
 }

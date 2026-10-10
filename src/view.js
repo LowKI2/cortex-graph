@@ -6,17 +6,25 @@ import SIM_SRC from './sim.worker.js';
 
 export const VIEW_TYPE = 'cortex-graph-view';
 
-export const STYLE_KEYS = ['center', 'repel', 'link', 'dist', 'range', 'nodeSize', 'degSize', 'glow', 'line', 'font', 'fontGrow', 'boldFrom', 'labelFrom', 'maxLabels', 'dimOthers'];
+export const STYLE_KEYS = ['center', 'repel', 'link', 'dist', 'range', 'nodeSize', 'degSize', 'glow', 'line', 'font', 'fontGrow', 'boldFrom', 'labelFrom', 'maxLabels', 'dimOthers', 'shStern', 'shRaute', 'shQuadrat', 'shRing'];
+const SHAPE_KEYS = new Set(['shStern', 'shRaute', 'shQuadrat', 'shRing']);
 const FORCE_KEYS = new Set(['center', 'repel', 'link', 'dist', 'range']);
 const PANEL = [
   ['secForces'], ['center', 0, 5, 0.05], ['range', 60, 2000, 10], ['repel', 0, 20, 0.1], ['link', 0, 1, 0.01], ['dist', 8, 150, 1],
   ['secNodes'], ['nodeSize', 0.3, 3, 0.05], ['dimOthers', 0, 0.6, 0.01], ['degSize', 0, 3, 0.05], ['glow', 0.2, 2.5, 0.05], ['line', 0.2, 3, 0.05],
   ['secLabels'], ['font', 2, 10, 0.5], ['fontGrow', 0, 3, 0.05], ['labelFrom', 0, 60, 1], ['boldFrom', 1, 60, 1], ['maxLabels', 0, 200, 5],
+  ['secShapes'], ['shStern', 0, 25, 0.5], ['shRaute', 0, 25, 0.5], ['shQuadrat', 0, 25, 0.5], ['shRing', 0, 25, 0.5],
 ];
 /* playback speed: vault time per second of playback */
 const TL_RATES = [[1000, 'tlRateSec'], [60000, 'tlRateMin'], [3600000, 'tlRateHour'], [86400000, 'tlRateDay'], [604800000, 'tlRateWeek'], [2592000000, 'tlRateMonth']];
-const KEYNAV = { '+': 'zin', '=': 'zin', '-': 'zout', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
-  w: 'up', s: 'down', a: 'left', d: 'right', q: 'rl', e: 'rr', 0: 'fit', f: 'fit' };
+/* keyboard + mouse bindings (user-editable in the panel) */
+export const KEY_ACTIONS = ['zin', 'zout', 'up', 'down', 'left', 'right', 'rl', 'rr', 'tu', 'td', 'fit', 'names', 'search'];
+export const DEFAULT_KEYS = { zin: ['+', '='], zout: ['-', ''], up: ['ArrowUp', 'w'], down: ['ArrowDown', 's'], left: ['ArrowLeft', 'a'], right: ['ArrowRight', 'd'],
+  rl: ['q', ''], rr: ['e', ''], tu: ['PageUp', 'r'], td: ['PageDown', 'v'], fit: ['0', 'f'], names: ['n', ''], search: ['/', ''] };
+export const DEFAULT_MOUSE = { left: 'rotate', right: 'pan', middle: 'pan', shift: 'link', invert: false, rotSpeed: 1 };
+const KEY_NAMES = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', ' ': 'Space', PageUp: 'PgUp', PageDown: 'PgDn', Home: 'Pos1', End: 'Ende', Insert: 'Einfg' };
+const normKey = (k) => (k && k.length === 1 ? k.toLowerCase() : k);
+const keyLabel = (k) => (!k ? '·' : KEY_NAMES[k] || (k.length === 1 ? k.toUpperCase() : k));
 
 export class CortexGraphView extends ItemView {
   constructor(leaf, plugin) {
@@ -64,6 +72,7 @@ export class CortexGraphView extends ItemView {
     this.tip = root.createDiv({ cls: 'cg-tip' }); this.tip.toggle(false);
 
     this.R = new GraphRenderer(this.canvas, this.labels, this.anchor);
+    this.R.mouse = this.plugin.settings.mouse;
     if (!this.R.active) { root.createDiv({ cls: 'cg-empty', text: t('noWebgl') }); return; }
     this.R.showLabels = this.plugin.settings.labels;
     this.R.setStyle(this.styleObj());
@@ -171,7 +180,8 @@ export class CortexGraphView extends ItemView {
     if (folderLinks) addFolderAnchors(G);
     this.R.anchorLines = s.folderLinks === 'lines';
     const fw = s.folderWeights || {};
-    for (const nd of G.nodes) nd.w = nd.note ? deepestFolderValue(fw, nd.note.path) || 1 : 1;
+    const nw = s.noteWeights || {};
+    for (const nd of G.nodes) nd.w = nd.note ? nw[nd.note.path] || deepestFolderValue(fw, nd.note.path) || 1 : 1;
     if (s.rankBy !== 'links') importance(G.nodes); else for (const nd of G.nodes) nd.rank = null;
     this.assignShapes(G.nodes);
     const sig = signature(G) + '|' + this.mode + '|' + s.layout + '|' + (s.hiddenFolders || []).join(',') + '|' + s.folderLinks + '|' + s.rankBy;
@@ -278,21 +288,32 @@ export class CortexGraphView extends ItemView {
   }
 
   assignShapes(nodes) {
-    const s = this.plugin.settings, MAP = { kreis: 0, circle: 0, ring: 1, stern: 2, star: 2, raute: 3, diamond: 3, quadrat: 4, square: 4 };
+    const s = this.plugin.settings, st = s.style || {}, MAP = { kreis: 0, circle: 0, ring: 1, stern: 2, star: 2, raute: 3, diamond: 3, quadrat: 4, square: 4 };
     const def = MAP[s.shapeDefault] ?? 0;
-    let hubFrom = Infinity;
+    const score = (nd) => (nd.rank ?? nd.deg) * (nd.w || 1);
+    /* automatic tiers by importance: top shStern % stars, next shRaute % diamonds, then squares, then rings */
+    const auto = new Map();
     if (s.hubStars) {
-      const r = nodes.filter((nd) => nd.note && !nd.hidden && !nd.anchor).map((nd) => (nd.rank ?? nd.deg) * (nd.w || 1)).sort((a, b) => b - a);
-      hubFrom = r[Math.max(0, Math.min(r.length - 1, Math.round(r.length * 0.02)))] || Infinity;
+      const ranked = nodes.filter((nd) => nd.note && !nd.hidden && !nd.anchor).sort((a, b) => score(b) - score(a));
+      let at = 0;
+      for (const [key, shape] of [['shStern', 2], ['shRaute', 3], ['shQuadrat', 4], ['shRing', 1]]) {
+        const n = Math.round(ranked.length * (Number(st[key]) || 0) / 100);
+        for (let i = at; i < Math.min(ranked.length, at + n); i++) if (score(ranked[i]) > 0) auto.set(ranked[i], shape);
+        at += n;
+      }
     }
+    const ns = s.noteShapes || {};
     for (const nd of nodes) {
       if (!nd.note) { nd.shape = 0; continue; }
+      const own = ns[nd.note.path];
       const fmv = nd.note.fm && (nd.note.fm.form ?? nd.note.fm.shape);
-      const fromFm = fmv != null ? MAP[String(fmv).toLowerCase()] : undefined;
+      const fromFm = own ? MAP[own] : fmv != null ? MAP[String(fmv).toLowerCase()] : undefined;
       const fromFolder = deepestFolderValue(s.folderShapes || {}, nd.note.path);
-      nd.shape = fromFm ?? (fromFolder != null ? MAP[fromFolder] ?? 0 : ((nd.rank ?? nd.deg) * (nd.w || 1) >= hubFrom ? 2 : def));
+      nd.shape = fromFm ?? (fromFolder != null ? MAP[fromFolder] ?? 0 : auto.get(nd) ?? def);
     }
   }
+
+  reshape() { if (!this.R) return; this.assignShapes(this.G.nodes); this.R.applyShapes(); }
 
 
   applyOverlay() {
@@ -587,8 +608,13 @@ export class CortexGraphView extends ItemView {
     if (e.target instanceof HTMLInputElement) return;
     if (e.key === 'Escape') { if (this.pathPending || this.R.pathSet) { this.pathPending = false; this.R.setPath(null); this.hideSheet(); } else this.select(-1); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    const a = KEYNAV[e.key];
-    if (a) { e.preventDefault(); this.navStep(a, a === 'fit' ? 1 : 6); }
+    const key = normKey(e.key), keys = this.plugin.settings.keys || DEFAULT_KEYS;
+    const a = KEY_ACTIONS.find((x) => (keys[x] || []).some((k) => k && normKey(k) === key));
+    if (!a) return;
+    e.preventDefault();
+    if (a === 'names') { this.btnLabels.click(); return; }
+    if (a === 'search') { this.searchInput.focus(); return; }
+    this.navStep(a, a === 'fit' ? 1 : 6);
   }
 
   showTip(k, e) {
@@ -970,6 +996,7 @@ export class CortexGraphView extends ItemView {
     else if (a === 'up') R.panBy(0, -step); else if (a === 'down') R.panBy(0, step);
     else if (a === 'left') R.panBy(-step, 0); else if (a === 'right') R.panBy(step, 0);
     else if (a === 'rl') R.orbitBy(0.02 * k, 0); else if (a === 'rr') R.orbitBy(-0.02 * k, 0);
+    else if (a === 'tu') R.orbitBy(0, 0.02 * k); else if (a === 'td') R.orbitBy(0, -0.02 * k);
   }
 
   buildSheet(root) {
@@ -1036,6 +1063,7 @@ export class CortexGraphView extends ItemView {
   }
 
   fillPanel() {
+    if (this.capture) this.capture();
     const body = this.panelBody; body.empty();
     const st = this.plugin.settings.style;
     let sec = body;
@@ -1050,16 +1078,96 @@ export class CortexGraphView extends ItemView {
       rg.value = String(st[key]);
       rg.oninput = () => { const v = Number(rg.value); out.setText(fmt(v, step)); this.setStyleKey(key, v); };
     }
+    const ps = this.plugin.settings;
+    const auto = sec.createEl('label', { cls: 'cg-row cg-row-check' });
+    auto.createSpan({ text: t('autoShapes') });
+    const acb = auto.createEl('input', { type: 'checkbox' }); acb.checked = !!ps.hubStars;
+    acb.onchange = () => { ps.hubStars = acb.checked; this.plugin.saveSettings(); this.plugin.views().forEach((w) => w.reshape()); };
+    const dr = sec.createEl('label', { cls: 'cg-row cg-row-check' });
+    dr.createSpan({ text: t('shapeRest') });
+    const sel = dr.createEl('select', { cls: 'dropdown' });
+    for (const k of ['kreis', 'ring', 'stern', 'raute', 'quadrat']) sel.createEl('option', { value: k, text: t('shape_' + k) });
+    sel.value = ps.shapeDefault || 'kreis';
+    sel.onchange = () => { ps.shapeDefault = sel.value; this.plugin.saveSettings(); this.plugin.views().forEach((w) => w.reshape()); };
     const wrap = sec.createEl('label', { cls: 'cg-row cg-row-check' });
     wrap.createSpan({ text: t('rotate') });
     const cb = wrap.createEl('input', { type: 'checkbox' }); cb.checked = this.plugin.settings.rotate;
     cb.onchange = () => { this.plugin.settings.rotate = cb.checked; this.plugin.saveSettings(); this.plugin.refreshViews('style'); };
+    this.fillControls(body);
+  }
+
+  fillControls(body) {
+    const ps = this.plugin.settings;
+    const wrapC = body.createDiv({ cls: 'cg-sec-wrap cg-controls' + (this.ctrlOpen ? ' is-open' : '') });
+    const head = wrapC.createDiv({ cls: 'cg-sec cg-sec-toggle' });
+    const chev = head.createSpan({ cls: 'cg-chev' }); setIcon(chev, 'chevron-right');
+    head.createSpan({ text: t('secControls') });
+    const box = wrapC.createDiv({ cls: 'cg-ctrl-body' });
+    head.onclick = () => { this.ctrlOpen = !this.ctrlOpen; wrapC.toggleClass('is-open', this.ctrlOpen); };
+    box.createDiv({ cls: 'cg-ctrl-sub', text: t('ctrlKeyboard') });
+    const save = () => { this.plugin.saveSettings(); this.plugin.views().forEach((v) => { if (v.R) v.R.mouse = ps.mouse; }); };
+    const btns = [];
+    const relabel = () => btns.forEach(({ b, a, i }) => b.setText(keyLabel(ps.keys[a][i])));
+    for (const a of KEY_ACTIONS) {
+      const row = box.createDiv({ cls: 'cg-row cg-row-check cg-keyrow' });
+      row.createSpan({ text: t('key_' + a) });
+      const kb = row.createDiv({ cls: 'cg-keys' });
+      for (let i = 0; i < 2; i++) {
+        const b = kb.createEl('button', { cls: 'cg-key' });
+        btns.push({ b, a, i });
+        b.onclick = (ev) => {
+          ev.preventDefault();
+          if (this.capture) this.capture();
+          b.addClass('is-capturing'); b.setText('…');
+          const onKey = (e) => {
+            e.preventDefault(); e.stopPropagation();
+            if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return;
+            if (e.key !== 'Escape') {
+              const k = e.key === 'Delete' || e.key === 'Backspace' ? '' : normKey(e.key);
+              if (k) for (const x of KEY_ACTIONS) ps.keys[x] = ps.keys[x].map((y) => (normKey(y) === k ? '' : y));
+              ps.keys[a] = ps.keys[a].slice(); ps.keys[a][i] = k;
+              save();
+            }
+            this.capture();
+          };
+          this.capture = () => { window.removeEventListener('keydown', onKey, true); b.removeClass('is-capturing'); this.capture = null; relabel(); };
+          window.addEventListener('keydown', onKey, true);
+        };
+      }
+    }
+    relabel();
+    box.createDiv({ cls: 'cg-ctrl-sub', text: t('ctrlMouse') });
+    const sel = (label, key, opts) => {
+      const row = box.createDiv({ cls: 'cg-row cg-row-check' });
+      row.createSpan({ text: t(label) });
+      const s = row.createEl('select', { cls: 'dropdown' });
+      for (const o of opts) s.createEl('option', { value: o, text: t('mouse_' + o) });
+      s.value = ps.mouse[key];
+      s.onchange = () => { ps.mouse[key] = s.value; save(); };
+    };
+    sel('mouseLeft', 'left', ['rotate', 'pan']);
+    sel('mouseRight', 'right', ['pan', 'rotate']);
+    sel('mouseMiddle', 'middle', ['pan', 'rotate']);
+    sel('mouseShift', 'shift', ['link', 'pan']);
+    const inv = box.createEl('label', { cls: 'cg-row cg-row-check' });
+    inv.createSpan({ text: t('mouseInvert') });
+    const icb = inv.createEl('input', { type: 'checkbox' }); icb.checked = !!ps.mouse.invert;
+    icb.onchange = () => { ps.mouse.invert = icb.checked; save(); };
+    const sp = box.createEl('label', { cls: 'cg-row' });
+    const top = sp.createSpan({ cls: 'cg-row-top' });
+    top.createSpan({ text: t('mouseRotSpeed') });
+    const out = top.createEl('b', { text: fmt(ps.mouse.rotSpeed, 0.05) });
+    const rg = sp.createEl('input', { type: 'range', attr: { min: 0.2, max: 3, step: 0.05 } });
+    rg.value = String(ps.mouse.rotSpeed);
+    rg.oninput = () => { ps.mouse.rotSpeed = Number(rg.value); out.setText(fmt(ps.mouse.rotSpeed, 0.05)); save(); };
+    box.createDiv({ cls: 'cg-ctrl-hint', text: t('ctrlHint') });
   }
 
   setStyleKey(key, v) {
     this.plugin.settings.style[key] = v;
     this.plugin.saveSettingsDebounced();
-    if (FORCE_KEYS.has(key)) { window.clearTimeout(this.forceT); this.forceT = window.setTimeout(() => this.simSend({ cmd: 'params', params: this.simParams() }), 60); }
+    if (SHAPE_KEYS.has(key)) { window.clearTimeout(this.shapeT); this.shapeT = window.setTimeout(() => this.reshape(), 60); }
+    else if (FORCE_KEYS.has(key)) { window.clearTimeout(this.forceT); this.forceT = window.setTimeout(() => this.simSend({ cmd: 'params', params: this.simParams() }), 60); }
     else this.R.setStyle(this.styleObj());
   }
 
