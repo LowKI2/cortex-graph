@@ -6,6 +6,15 @@ import {
 } from 'three';
 
 const FLARE_SEG = 4;
+export const LABEL_FONTS = {
+  ui: null, text: null,
+  sans: "'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
+  serif: "Georgia, 'Times New Roman', serif",
+  mono: "'Cascadia Mono', Consolas, 'SFMono-Regular', Menlo, monospace",
+  narrow: "Bahnschrift, 'Arial Narrow', 'Roboto Condensed', sans-serif",
+  round: "ui-rounded, 'SF Pro Rounded', 'Segoe UI Variable Display', 'Nunito', sans-serif",
+};
+const cssVarFont = (v) => { try { return getComputedStyle(document.body).getPropertyValue(v).trim() || 'system-ui, sans-serif'; } catch { return 'system-ui, sans-serif'; } };
 const STYLE_DEFAULT = { nodeSize: 1, degSize: 1, glow: 1, line: 1, taper: 1, taperBright: 0.6, nodeBright: 1, font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, rotate: true };
 
 function hexToRgb(h) {
@@ -488,6 +497,10 @@ export class GraphRenderer {
 
   setStyle(st) {
     this.style = Object.assign(this.style, st);
+    const lf = this.style.labelFont || 'ui';
+    this.fontStack = LABEL_FONTS[lf] || cssVarFont(lf === 'text' ? '--font-text' : '--font-interface');
+    this.labelLayer.setCssProps({ '--cg-lf': this.fontStack });
+    for (const c of ['glow', 'shadow', 'pill', 'none']) this.labelLayer.toggleClass('cg-ls-' + c, (this.style.labelStyle || 'glow') === c);
     this.nodeMat.uniforms.uGlow.value = this.style.glow;
     this.nodeMat.uniforms.uSizeK.value = 1 / Math.max(1, this.style.nodeSize);
     this.nodeMat.uniforms.uBright.value = this.style.nodeBright != null ? this.style.nodeBright : 1;
@@ -605,6 +618,10 @@ export class GraphRenderer {
       if (el.textContent !== txt) el.setText(txt);
       el.toggleClass('is-selected', prio);
       el.toggleClass('is-ghost', !!nodes[k].ghost);
+      const bc = this.baseColor[k] || [0.6, 0.65, 0.8];
+      const lc = 'rgb(' + Math.round(Math.min(1, bc[0]) * 255) + ',' + Math.round(Math.min(1, bc[1]) * 255) + ',' + Math.round(Math.min(1, bc[2]) * 255) + ')';
+      if (el.cgLc !== lc) { el.cgLc = lc; el.setCssProps({ '--cg-lc': lc }); }
+      this.drawn[this.drawn.length - 1].c = lc;
       el.setCssStyles({
         transform: 'translate(' + Math.round(p.x) + 'px,' + Math.round(p.y + 10) + 'px) translateX(-50%)',
         fontSize: fs.toFixed(1) + 'px', fontWeight: bold ? '600' : '400',
@@ -809,8 +826,16 @@ export class GraphRenderer {
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
     const light = this.light;
     for (const d of this.drawn || []) {
-      ctx.font = (d.bold ? '600 ' : '400 ') + (d.fs * dpr).toFixed(1) + 'px system-ui, sans-serif';
-      ctx.shadowColor = light ? 'rgba(255,255,255,.9)' : 'rgba(168,130,255,.9)'; ctx.shadowBlur = 6 * dpr;
+      const ls = this.style.labelStyle || 'glow';
+      ctx.font = (d.bold ? '600 ' : '400 ') + (d.fs * dpr).toFixed(1) + 'px ' + (this.fontStack || 'system-ui, sans-serif');
+      if (ls === 'pill' && d.c) {
+        const tw = ctx.measureText(d.txt).width, h = d.fs * 1.3 * dpr;
+        ctx.shadowBlur = 0; ctx.globalAlpha = 0.45; ctx.fillStyle = d.c;
+        ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(d.x * dpr - tw / 2 - 5 * dpr, d.y * dpr - 1 * dpr, tw + 10 * dpr, h, h / 2); else ctx.rect(d.x * dpr - tw / 2 - 5 * dpr, d.y * dpr - 1 * dpr, tw + 10 * dpr, h);
+        ctx.fill(); ctx.globalAlpha = 1;
+      }
+      ctx.shadowColor = ls === 'shadow' && d.c ? d.c : ls === 'none' || ls === 'pill' ? 'rgba(0,0,0,.8)' : (light ? 'rgba(255,255,255,.9)' : 'rgba(168,130,255,.9)');
+      ctx.shadowBlur = (ls === 'none' || ls === 'pill' ? 2 : 6) * dpr;
       ctx.fillStyle = light ? '#222' : (d.prio ? '#fff' : '#e8e6ff');
       ctx.fillText(d.txt, d.x * dpr, d.y * dpr);
     }

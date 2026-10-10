@@ -140,7 +140,7 @@ export class CortexGraphView extends ItemView {
     this.R = null;
   }
 
-  styleObj() { const s = this.plugin.settings; const o = { rotate: s.rotate }; for (const k of STYLE_KEYS) o[k] = s.style[k]; return o; }
+  styleObj() { const s = this.plugin.settings; const o = { rotate: s.rotate, labelFont: s.labelFont || 'ui', labelStyle: s.labelStyle || 'glow' }; for (const k of STYLE_KEYS) o[k] = s.style[k]; return o; }
   simParams() { const s = this.plugin.settings.style; return { center: s.center, repel: s.repel, link: s.link, dist: s.dist, range: s.range }; }
 
   applyTheme() {
@@ -1070,9 +1070,10 @@ export class CortexGraphView extends ItemView {
     this.panelBody.empty();
     const body = this.panelBody;
     const st = this.plugin.settings.style;
+    const secs = {};
     let sec = body;
     for (const row of PANEL) {
-      if (row.length === 1) { sec = body.createDiv({ cls: 'cg-sec-wrap' }); sec.createDiv({ cls: 'cg-sec', text: t(row[0]) }); continue; }
+      if (row.length === 1) { sec = body.createDiv({ cls: 'cg-sec-wrap' }); sec.createDiv({ cls: 'cg-sec', text: t(row[0]) }); secs[row[0]] = sec; continue; }
       const [key, min, max, step] = row;
       const wrap = sec.createEl('label', { cls: 'cg-row' });
       const top = wrap.createSpan({ cls: 'cg-row-top' });
@@ -1083,6 +1084,18 @@ export class CortexGraphView extends ItemView {
       rg.oninput = () => { const v = Number(rg.value); out.setText(fmt(v, step)); this.setStyleKey(key, v); };
     }
     const ps = this.plugin.settings;
+    const pick = (parent, label, key, opts, def) => {
+      const row = parent.createEl('label', { cls: 'cg-row cg-row-check' });
+      row.createSpan({ text: t(label) });
+      const d = row.createEl('select', { cls: 'dropdown' });
+      for (const o of opts) d.createEl('option', { value: o, text: t(key + '_' + o) });
+      d.value = ps[key] || def;
+      d.onchange = () => { ps[key] = d.value; this.plugin.saveSettings(); this.plugin.views().forEach((v) => v.R && v.R.setStyle(v.styleObj())); };
+    };
+    if (secs.secLabels) {
+      pick(secs.secLabels, 'labelFont', 'labelFont', ['ui', 'text', 'sans', 'serif', 'mono', 'narrow', 'round'], 'ui');
+      pick(secs.secLabels, 'labelStyle', 'labelStyle', ['glow', 'shadow', 'pill', 'none'], 'glow');
+    }
     const auto = sec.createEl('label', { cls: 'cg-row cg-row-check' });
     auto.createSpan({ text: t('autoShapes') });
     const acb = auto.createEl('input', { type: 'checkbox' }); acb.checked = !!ps.hubStars;

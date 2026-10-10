@@ -220,3 +220,11 @@
 .cg-tab { font-size: var(--font-ui-smaller); padding: 3px 9px; height: auto; border-radius: 12px; background: transparent; box-shadow: none; border: 1px solid var(--cg-border); color: var(--text-muted); }
 .cg-tab.is-active { background: var(--interactive-accent); color: var(--text-on-accent); border-color: var(--interactive-accent); }
 .cg-root.is-mobile .cg-panel { width: auto; }
+
+/* label font + style (shadow / background in the note's folder color) */
+.cg-label { font-family: var(--cg-lf, inherit); }
+.cg-labels.cg-ls-shadow .cg-label { text-shadow: 0 0 5px var(--cg-lc), 0 0 9px var(--cg-lc), 0 0 2px #000; }
+.cg-labels.cg-ls-pill .cg-label { background: color-mix(in srgb, var(--cg-lc) 38%, transparent); border: 1px solid color-mix(in srgb, var(--cg-lc) 55%, transparent);
+  padding: 0 .45em; border-radius: 1em; text-shadow: 0 0 2px rgba(0, 0, 0, .8); }
+.cg-labels.cg-ls-none .cg-label { text-shadow: 0 0 2px rgba(0, 0, 0, .7); }
+.theme-light .cg-labels.cg-ls-pill .cg-label, .theme-light .cg-labels.cg-ls-none .cg-label { text-shadow: none; }
