@@ -15,7 +15,7 @@ export const LABEL_FONTS = {
   round: "ui-rounded, 'SF Pro Rounded', 'Segoe UI Variable Display', 'Nunito', sans-serif",
 };
 const cssVarFont = (v) => { try { return getComputedStyle(document.body).getPropertyValue(v).trim() || 'system-ui, sans-serif'; } catch { return 'system-ui, sans-serif'; } };
-const STYLE_DEFAULT = { nodeSize: 1, degSize: 1, glow: 1, line: 1, taper: 1, taperBright: 0.6, nodeBright: 1, nodeOpacity: 1, font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, rotate: true };
+const STYLE_DEFAULT = { nodeSize: 1, degSize: 1, glow: 1, line: 1, taper: 1, taperBright: 0.6, taperLen: 1, nodeBright: 1, nodeOpacity: 1, font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, rotate: true };
 
 function hexToRgb(h) {
   const v = parseInt(String(h).replace('#', '').slice(0, 6), 16) || 0;
@@ -52,10 +52,10 @@ export class GraphRenderer {
     });
     /* tapered line ends: a short screen-space wedge at each end of an edge, thick at the node, thinning into the line */
     this.flareMat = new ShaderMaterial({
-      uniforms: { uScale: { value: 300 }, uRes: { value: new Vector2(800, 600) }, uTaper: { value: 1 } },
+      uniforms: { uScale: { value: 300 }, uRes: { value: new Vector2(800, 600) }, uTaper: { value: 1 }, uLen: { value: 1 } },
       vertexShader: `
         attribute vec3 aB; attribute float aT; attribute float aSide; attribute float aSize; attribute vec3 color; attribute float alpha;
-        uniform float uScale; uniform vec2 uRes; uniform float uTaper;
+        uniform float uScale; uniform vec2 uRes; uniform float uTaper; uniform float uLen;
         varying vec3 vColor; varying float vAlpha;
         void main() {
           vColor = color;
@@ -68,11 +68,11 @@ export class GraphRenderer {
           d /= segLen; vec2 nrm = vec2(-d.y, d.x);
           float px = aSize * uScale / -mvA.z;              // node diameter in device pixels
           float zf = clamp(-mvA.z / 700.0, 0.2, 1.0);   // zoomed in close: the wedge shrinks instead of growing with the node
-          float len = min(px * (0.45 + 0.35 * uTaper) * zf, segLen * 0.45);
+          float len = min(px * 0.8 * uLen * zf, segLen * 0.48);
           float hw = max(0.5, px * 0.06 * uTaper * zf * pow(1.0 - aT, 1.7));   // base width ≈ 1/3 of the visible node at taper 1
           vec2 sP = sA + d * len * aT + nrm * aSide * hw;
           gl_Position = vec4(sP / (0.5 * uRes) * cA.w, cA.z, cA.w);
-          vAlpha = alpha * pow(1.0 - aT, 0.8);
+          vAlpha = alpha * pow(1.0 - aT, 0.35);   // solid wedge that thins out, not a glow
         }`,
       fragmentShader: 'varying vec3 vColor; varying float vAlpha; void main() { gl_FragColor = vec4(vColor, vAlpha); }',
       transparent: true, depthWrite: false, blending: AdditiveBlending, side: DoubleSide,
@@ -130,7 +130,7 @@ export class GraphRenderer {
           }
           // bigger nodes overlap more under additive blending – keep their brightness constant
           float hk = uGlow * uSizeK;
-          vec3 col = vColor * (halo * 0.95 * hk + core * 1.1 * sqrt(uSizeK)) + vec3(1.0) * core * uCore * uSizeK;
+          vec3 col = vColor * (halo * 0.95 * hk + core * 1.1) + vec3(1.0) * core * uCore;
           float a = clamp(halo * 0.9 * hk + core, 0.0, 1.0) * vAlpha;
           if (uOpacity < 0.0) { gl_FragColor = vec4(col * uBright, a); return; }
           // premultiplied: the glow adds light, the core covers what lies behind it (opacity slider)
@@ -194,7 +194,7 @@ export class GraphRenderer {
     g.setAttribute('alpha', new BufferAttribute(new Float32Array(n), 1));
     g.setAttribute('heat', new BufferAttribute(new Float32Array(n), 1));
     g.setAttribute('shape', new BufferAttribute(new Float32Array(n), 1));
-    this.points = new Points(g, this.nodeMat); this.points.frustumCulled = false; this.root.add(this.points);
+    this.points = new Points(g, this.nodeMat); this.points.frustumCulled = false; this.points.renderOrder = 10; this.root.add(this.points);
     const m = edges.length;
     const lg = new BufferGeometry();
     lg.setAttribute('position', new BufferAttribute(new Float32Array(m * 6), 3));
@@ -511,6 +511,7 @@ export class GraphRenderer {
     this.nodeMat.uniforms.uBright.value = this.style.nodeBright != null ? this.style.nodeBright : 1;
     this.nodeMat.uniforms.uOpacity.value = this.style.nodeOpacity != null ? this.style.nodeOpacity : 1;
     this.flareMat.uniforms.uTaper.value = this.style.taper || 0;
+    this.flareMat.uniforms.uLen.value = this.style.taperLen != null ? this.style.taperLen : 1;
     if (this.flares) { const vis = (this.style.taper || 0) > 0, was = this.flares.visible; this.flares.visible = vis; if (vis && !was) this.syncFlares(); }
     this.refreshColors(); this.updateLabels(true);
   }
