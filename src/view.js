@@ -429,7 +429,7 @@ export class CortexGraphView extends ItemView {
   buildTimeline(root) {
     const bar = root.createDiv({ cls: 'cg-time' }); bar.toggle(false);
     this.timeBar = bar;
-    this.tl = { mode: 'ctime', from: 0, to: 1, tag: '', rate: 3600000, playing: false };
+    this.tl = { mode: 'ctime', from: 0, to: 1, pos: 1, tag: '', rate: 3600000, playing: false };
     const row1 = bar.createDiv({ cls: 'cg-time-row' });
     this.playBtn = row1.createEl('button', { cls: 'cg-time-play clickable-icon', attr: { 'aria-label': t('tlPlay') } }); setIcon(this.playBtn, 'play');
     this.playBtn.onclick = () => (this.tl.playing ? this.stopPlay() : this.startPlay());
@@ -451,16 +451,35 @@ export class CortexGraphView extends ItemView {
     this.tlCount = row1.createSpan({ cls: 'cg-time-count' });
     const x = row1.createEl('button', { cls: 'clickable-icon', attr: { 'aria-label': t('close') } }); setIcon(x, 'x');
     x.onclick = () => { if (this.R.rec) this.finishRecording(); this.toggleTimeline(false); };
-    const row2 = bar.createDiv({ cls: 'cg-time-row' });
-    const mk = (lbl) => {
-      const w = row2.createDiv({ cls: 'cg-time-range' });
+    // left: range (From / To), right: timeline with the playhead
+    const row2 = bar.createDiv({ cls: 'cg-time-row cg-time-row2' });
+    const left = row2.createDiv({ cls: 'cg-time-left' });
+    const right = row2.createDiv({ cls: 'cg-time-right' });
+    const mk = (parent, lbl, cls) => {
+      const w = parent.createDiv({ cls: 'cg-time-range' + (cls ? ' ' + cls : '') });
       const top = w.createDiv({ cls: 'cg-time-label' }); top.createSpan({ text: lbl }); const out = top.createEl('b');
       const rg = w.createEl('input', { type: 'range', attr: { min: 0, max: 1000, step: 1 } });
       return { rg, out };
     };
-    this.tlFrom = mk(t('tlFrom')); this.tlTo = mk(t('tlTo'));
-    this.tlFrom.rg.oninput = () => { this.stopPlay(); this.tl.from = Math.min(Number(this.tlFrom.rg.value), Number(this.tlTo.rg.value)) / 1000; this.tlFrom.rg.value = String(this.tl.from * 1000); this.applyMask(); };
-    this.tlTo.rg.oninput = () => { this.stopPlay(); this.tl.to = Math.max(Number(this.tlTo.rg.value), Number(this.tlFrom.rg.value)) / 1000; this.tlTo.rg.value = String(this.tl.to * 1000); this.applyMask(); };
+    this.tlFrom = mk(left, t('tlFrom')); this.tlTo = mk(left, t('tlTo'));
+    this.tlPos = mk(right, t('tlTimeline'), 'cg-time-pos');
+    this.tlFrom.rg.oninput = () => {
+      const tl = this.tl; tl.from = Math.min(Number(this.tlFrom.rg.value), Number(this.tlTo.rg.value)) / 1000;
+      this.tlFrom.rg.value = String(tl.from * 1000); if (tl.pos < tl.from) tl.pos = tl.from; this.syncPos(); this.applyMask();
+    };
+    this.tlTo.rg.oninput = () => {
+      const tl = this.tl; tl.to = Math.max(Number(this.tlTo.rg.value), Number(this.tlFrom.rg.value)) / 1000;
+      this.tlTo.rg.value = String(tl.to * 1000); if (tl.pos > tl.to || !tl.playing) tl.pos = tl.to; this.syncPos(); this.applyMask();
+    };
+    this.tlPos.rg.oninput = () => {
+      const tl = this.tl; tl.pos = Math.max(tl.from, Math.min(tl.to, Number(this.tlPos.rg.value) / 1000)); this.syncPos(); this.applyMask();
+    };
+  }
+
+  /* timeline slider covers From..To */
+  syncPos() {
+    const tl = this.tl, span = Math.max(1e-6, tl.to - tl.from);
+    this.tlPos.rg.value = String(Math.round((tl.pos - tl.from) / span * 1000));
   }
 
   toggleTimeline(on) {
@@ -502,8 +521,8 @@ export class CortexGraphView extends ItemView {
     for (const nd of this.G.nodes) if (nd.note && !nd.hidden) { const v = this.timeOf(nd.note); if (isNaN(v)) continue; if (v < lo) lo = v; if (v > hi) hi = v; }
     if (!isFinite(lo)) { lo = 0; hi = 1; }
     this.tl.lo = lo; this.tl.hi = Math.max(hi, lo + 1);
-    this.tl.from = 0; this.tl.to = 1;
-    this.tlFrom.rg.value = '0'; this.tlTo.rg.value = '1000';
+    this.tl.from = 0; this.tl.to = 1; this.tl.pos = 1;
+    this.tlFrom.rg.value = '0'; this.tlTo.rg.value = '1000'; this.syncPos();
     // pick the playback speed that plays the whole range in roughly 20 seconds
     const span = this.tl.hi - this.tl.lo;
     let best = TL_RATES[0][0];
@@ -516,7 +535,7 @@ export class CortexGraphView extends ItemView {
   applyMask() {
     if (!this.R || !this.R.active || !this.timeBar) return;
     if (!this.tlOn) { this.R.fresh = null; this.R.setMask(null); return; }
-    const tl = this.tl, a = this.timeAt(tl.from), b = this.timeAt(tl.to), tag = tl.tag;
+    const tl = this.tl, a = this.timeAt(tl.from), b = this.timeAt(tl.pos), tag = tl.tag;
     const set = new Set(), fresh = new Set(), freshFrom = b - (tl.hi - tl.lo) * 0.03;
     this.G.nodes.forEach((nd, k) => {
       const n = nd.note; if (!n) return;
@@ -530,7 +549,7 @@ export class CortexGraphView extends ItemView {
     this.R.fresh = fresh.size ? fresh : null;
     this.R.setMask(set);
     const fmt = (v) => moment(v).format(tl.hi - tl.lo < 4 * 86400000 ? 'DD.MM. HH:mm' : 'DD.MM.YYYY');
-    this.tlFrom.out.setText(fmt(a)); this.tlTo.out.setText(fmt(b));
+    this.tlFrom.out.setText(fmt(a)); this.tlTo.out.setText(fmt(this.timeAt(tl.to))); this.tlPos.out.setText(fmt(b));
     this.tlCount.setText(set.size + ' ' + t('notes'));
   }
 
@@ -538,22 +557,22 @@ export class CortexGraphView extends ItemView {
   restartIfPlaying() {
     const tl = this.tl;
     if (!tl.playing) return;
-    tl.to = tl.from; this.tlTo.rg.value = String(tl.to * 1000);
+    tl.pos = tl.from; this.syncPos();
     this.applyMask();
   }
 
   startPlay() {
     const tl = this.tl;
-    if (tl.to >= 0.999) { tl.to = tl.from; }
+    if (tl.pos >= tl.to - 0.001) tl.pos = tl.from;
     tl.playing = true; setIcon(this.playBtn, 'pause');
     let last = performance.now();
     const step = (ts) => {
       if (!tl.playing) return;
       const dt = (ts - last) / 1000; last = ts;
-      tl.to = Math.min(1, tl.to + dt * tl.rate * (tl.factor || 1) / Math.max(1, tl.hi - tl.lo));
-      this.tlTo.rg.value = String(tl.to * 1000);
+      tl.pos = Math.min(tl.to, tl.pos + dt * tl.rate * (tl.factor || 1) / Math.max(1, tl.hi - tl.lo));
+      this.syncPos();
       this.applyMask();
-      if (tl.to >= 1) { this.stopPlay(); if (this.R.rec) window.setTimeout(() => this.finishRecording(), 1500); return; }
+      if (tl.pos >= tl.to) { this.stopPlay(); if (this.R.rec) window.setTimeout(() => this.finishRecording(), 1500); return; }
       this.playRaf = window.requestAnimationFrame(step);
     };
     this.playRaf = window.requestAnimationFrame(step);
@@ -562,10 +581,10 @@ export class CortexGraphView extends ItemView {
   startRecording() {
     const tl = this.tl;
     const fmt = (v) => moment(v).format(tl.hi - tl.lo < 4 * 86400000 ? 'DD.MM.YYYY HH:mm' : 'DD.MM.YYYY');
-    const ok = this.R.startCapture(() => fmt(this.timeAt(tl.to)) + (tl.tag ? '   #' + tl.tag : '') + '   ' + (this.R.mask ? this.R.mask.size : '') + ' ' + t('notes'));
+    const ok = this.R.startCapture(() => fmt(this.timeAt(tl.pos)) + (tl.tag ? '   #' + tl.tag : '') + '   ' + (this.R.mask ? this.R.mask.size : '') + ' ' + t('notes'));
     if (!ok) { new Notice(t('tlRecNo')); return; }
     this.recBtn.addClass('is-recording'); setIcon(this.recBtn, 'square');
-    tl.to = tl.from; this.tlTo.rg.value = String(tl.to * 1000);
+    tl.pos = tl.from; this.syncPos();
     this.applyMask();
     window.setTimeout(() => this.startPlay(), 600);
   }
@@ -604,7 +623,7 @@ export class CortexGraphView extends ItemView {
     return {
       cam: this.R.getCamera(), mode: this.mode, focusPath: this.focusPath, depth: this.depth, problems: this.problems,
       activity: this.activity, labels: this.plugin.settings.labels, pinned: this.pinned,
-      tl: this.tlOn ? { mode: this.tl.mode, tag: this.tl.tag, from: this.tl.from, to: this.tl.to } : null,
+      tl: this.tlOn ? { mode: this.tl.mode, tag: this.tl.tag, from: this.tl.from, to: this.tl.to, pos: this.tl.pos } : null,
     };
   }
 
@@ -623,7 +642,8 @@ export class CortexGraphView extends ItemView {
       this.tl.mode = v.tl.mode; this.modeSel.value = v.tl.mode; this.initRange();
       this.tl.tag = v.tl.tag || ''; this.tagSel.value = this.tl.tag;
       this.tl.from = v.tl.from; this.tl.to = v.tl.to;
-      this.tlFrom.rg.value = String(v.tl.from * 1000); this.tlTo.rg.value = String(v.tl.to * 1000);
+      this.tl.pos = v.tl.pos != null ? v.tl.pos : v.tl.to;
+      this.tlFrom.rg.value = String(v.tl.from * 1000); this.tlTo.rg.value = String(v.tl.to * 1000); this.syncPos();
       this.applyMask();
     } else if (this.tlOn) this.toggleTimeline(false);
     window.setTimeout(() => this.R.setCamera(v.cam), 50);

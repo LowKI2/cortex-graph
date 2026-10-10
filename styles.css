@@ -156,3 +156,9 @@
 .cg-time-rec.clickable-icon svg { fill: currentColor; }
 .cg-time-rec.is-recording { color: #fff; }
 .cg-rec-preview { width: 100%; max-height: 50vh; border-radius: 10px; background: #000; margin-bottom: 8px; }
+.cg-time-row2 { align-items: stretch; gap: 14px; }
+.cg-time-left { flex: 0 0 38%; display: flex; flex-direction: column; gap: 2px; padding-right: 12px; border-right: 1px solid var(--cg-border); }
+.cg-time-right { flex: 1; display: flex; align-items: center; }
+.cg-time-pos { width: 100%; }
+.cg-time-pos .cg-time-label b { font-size: var(--font-ui-small); }
+.cg-time { width: min(720px, calc(100% - 140px)); }
