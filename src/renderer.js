@@ -139,9 +139,10 @@ export class GraphRenderer {
           }
           // bigger nodes overlap more under additive blending – keep their brightness constant
           float hk = uGlow * uSizeK;
-          vec3 col = vColor * (halo * 0.95 * hk + core * 1.1) + vec3(1.0) * core * uCore;
+          // Helligkeit der Knoten = the node itself, Helligkeit des Leuchtens = the glow (uGlow), Radius = vK
+          vec3 col = vColor * (halo * 0.95 * hk + core * 1.1 * uBright) + vec3(1.0) * core * uCore * uBright;
           float a = clamp(halo * 0.9 * hk + core, 0.0, 1.0) * vAlpha;
-          gl_FragColor = vec4(col * uBright, a);   // additive: the glow lies on top of the node
+          gl_FragColor = vec4(col, a);   // additive: the glow lies on top of the node
         }`,
       transparent: true, depthWrite: false, blending: AdditiveBlending,
     });
@@ -459,6 +460,7 @@ export class GraphRenderer {
     const st = this.style, u = this.nodeMat.uniforms;
     u.uRad.value = Math.max(0.4, st.glow != null ? st.glow : 1);   // Leuchten = radius of the glow, not its strength
     u.uPx.value = this.renderer.getPixelRatio();
+    u.uGlow.value = st.glowBright != null ? st.glowBright : 1;
     u.uSizeK.value = 1 / Math.sqrt(Math.max(1, st.nodeSize));
     u.uBright.value = st.nodeBright != null ? st.nodeBright : 1;  // Helligkeit = intensity
     this.baseMat.uniforms.uBright.value = u.uBright.value;
