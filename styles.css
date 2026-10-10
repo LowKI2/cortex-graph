@@ -58,7 +58,8 @@
 .cg-nb.is-held, .cg-nb:active { background: var(--interactive-accent); color: var(--text-on-accent); }
 .cg-pad { display: grid; grid-template-columns: repeat(3, 36px); grid-auto-rows: 36px; gap: 4px; }
 .cg-fit { color: var(--interactive-accent); }
-.cg-nav.is-mini > :not(.cg-navtoggle) { display: none; }
+.cg-nav.is-mini .cg-pad { display: flex; }
+.cg-nav.is-mini .cg-pad > :not(.cg-navtoggle) { display: none; }
 .cg-nav.is-mini .cg-navtoggle { color: var(--interactive-accent); }
 
 /* selection sheet */

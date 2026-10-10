@@ -442,8 +442,7 @@ export class CortexGraphView extends ItemView {
     pad.createSpan(); btn(pad, 'up', 'chevron-up', t('up')); pad.createSpan();
     btn(pad, 'left', 'chevron-left', t('left')); btn(pad, 'fit', 'maximize', t('fit'), 'cg-fit'); btn(pad, 'right', 'chevron-right', t('right'));
     btn(pad, 'rl', 'rotate-ccw', t('rotL')); btn(pad, 'down', 'chevron-down', t('down')); btn(pad, 'rr', 'rotate-cw', t('rotR'));
-    btn(pad, 'zout', 'minus', t('zoomOut')); pad.createSpan(); btn(pad, 'zin', 'plus', t('zoomIn'));
-    btn(nav, 'hide', 'move', t('navToggle'), 'cg-navtoggle');
+    btn(pad, 'zout', 'minus', t('zoomOut')); btn(pad, 'hide', 'move', t('navToggle'), 'cg-navtoggle'); btn(pad, 'zin', 'plus', t('zoomIn'));
     let holdA = null, holdBtn = null, raf = 0, last = 0;
     const loop = (ts) => { if (!holdA) return; const k = Math.min(4, (ts - last) / 16.7); last = ts; this.navStep(holdA, k); raf = window.requestAnimationFrame(loop); };
     const stop = () => { holdA = null; window.cancelAnimationFrame(raf); if (holdBtn) holdBtn.removeClass('is-held'); holdBtn = null; };
