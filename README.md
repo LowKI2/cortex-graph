@@ -59,6 +59,47 @@ Works on **desktop and mobile** (touch controls included).
 | Select / open | click / double-click | tap / double-tap |
 | File menu | right-click | buttons in the info card |
 
+## Live activity from AI tools
+
+Cortex Graph shows what an AI agent is doing in your vault: notes it **writes** flash orange, notes it **reads** flash cyan.
+
+- **Writes** are detected automatically – any change made outside the Obsidian editor (MCP server, CLI agent, sync, scripts).
+- **Reads** cannot be seen by Obsidian, because tools read files directly from disk. They become visible when the tool logs them.
+
+### The log format
+
+The plugin watches `<vault>/.cortex/activity.jsonl`. Append one JSON object per line:
+
+```json
+{"op":"read","path":"30 Wissen/Blender.md"}
+{"op":"write","path":"20 Projekte/Plan.md"}
+```
+
+`path` may be vault-relative or absolute. Anything can write these lines – a hook, an MCP server, a shell script. The file is trimmed automatically when it grows past 256 KB.
+
+### Claude Code
+
+1. Plugin settings → *Show reads by AI tools* → **Set up…** → *Save script*. This puts [`tools/cortex-activity-hook.mjs`](tools/cortex-activity-hook.mjs) into `.cortex/` of your vault (Node.js 18+).
+2. Copy the shown snippet into `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      { "matcher": "Read|Write|Edit|MultiEdit",
+        "hooks": [{ "type": "command", "command": "node \"/path/to/vault/.cortex/cortex-activity-hook.mjs\"" }] }
+    ]
+  }
+}
+```
+
+The script finds the vault by itself (nearest folder with `.obsidian`) and ignores files outside vaults, so it can stay enabled globally.
+
+### Other tools
+
+- **Tools with hooks** can call the same script and pass `{"tool_name":"Read","tool_input":{"file_path":"..."}}` on stdin (any tool name other than `Read` counts as a write).
+- **MCP servers** can append the lines directly after each tool call – a few lines of code.
+
 ## Commands
 
 - **Open graph** – opens the global graph in a new tab.

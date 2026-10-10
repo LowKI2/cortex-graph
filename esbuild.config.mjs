@@ -11,7 +11,7 @@ const ctx = await esbuild.context({
   external: ['obsidian', 'electron', '@codemirror/*', '@lezer/*'],
   format: 'cjs',
   target: 'es2020',
-  loader: { '.worker.js': 'text' },
+  loader: { '.worker.js': 'text', '.mjs': 'text' },
   logLevel: 'info',
   sourcemap: prod ? false : 'inline',
   treeShaking: true,

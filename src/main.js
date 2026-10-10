@@ -1,4 +1,5 @@
-import { Plugin, PluginSettingTab, Setting, FuzzySuggestModal, TFolder, TFile, debounce, getAllTags } from 'obsidian';
+import { Plugin, PluginSettingTab, Setting, FuzzySuggestModal, Modal, Notice, TFolder, TFile, debounce, getAllTags } from 'obsidian';
+import HOOK_SRC from '../tools/cortex-activity-hook.mjs';
 import { parseGraphCfg } from './model';
 import { FolderColors } from './folders';
 import { CortexGraphView, VIEW_TYPE, DEFAULT_KEYS, DEFAULT_MOUSE, KEY_ACTIONS } from './view';
@@ -250,6 +251,7 @@ class CortexGraphSettingTab extends PluginSettingTab {
     new Setting(el).setName(t('sBehavior')).setHeading();
     new Setting(el).setName(t('sFocusCam')).setDesc(t('sFocusCamDesc')).addToggle((tg) => tg.setValue(s.focusCamera).onChange((v) => { s.focusCamera = v; p.saveSettings(); }));
     new Setting(el).setName(t('sClaudeLive')).setDesc(t('sClaudeLiveDesc')).addToggle((tg) => tg.setValue(s.claudeLive).onChange((v) => { s.claudeLive = v; p.saveSettings(); }));
+    new Setting(el).setName(t('sHook')).setDesc(t('sHookDesc')).addButton((b) => b.setButtonText(t('sHookBtn')).onClick(() => new HookModal(this.app).open()));
     new Setting(el).setName(t('sRecSave')).addDropdown((d) => d
       .addOption('ask', t('sRecAsk')).addOption('auto', t('sRecAuto')).setValue(s.recSave)
       .onChange((v) => { s.recSave = v; p.saveSettings(); }));
@@ -259,4 +261,29 @@ class CortexGraphSettingTab extends PluginSettingTab {
     new Setting(el).setName(t('sDepth')).addSlider((sl) => sl.setLimits(1, 3, 1).setValue(s.depth).setDynamicTooltip()
       .onChange((v) => { s.depth = v; p.saveSettings(); }));
   }
+}
+
+/* explains the activity log and installs the hook script for Claude Code (or any tool with hooks) */
+class HookModal extends Modal {
+  onOpen() {
+    const { contentEl } = this, ad = this.app.vault.adapter;
+    const base = (ad.basePath || '').replace(/\\/g, '/');
+    const script = (base ? base + '/' : '') + '.cortex/cortex-activity-hook.mjs';
+    this.titleEl.setText(t('hookTitle'));
+    contentEl.createEl('p', { text: t('hookIntro') });
+    contentEl.createEl('pre', { cls: 'cg-code', text: '{"op":"read","path":"30 Wissen/Blender.md"}' });
+    contentEl.createEl('h4', { text: t('hookStep1') });
+    new Setting(contentEl).setName('.cortex/cortex-activity-hook.mjs').setDesc(t('hookStep1Desc')).addButton((b) => b.setButtonText(t('hookSave')).setCta().onClick(async () => {
+      if (!(await ad.exists('.cortex'))) await ad.mkdir('.cortex');
+      await ad.write('.cortex/cortex-activity-hook.mjs', HOOK_SRC);
+      new Notice(t('hookSaved'));
+    }));
+    contentEl.createEl('h4', { text: t('hookStep2') });
+    contentEl.createEl('p', { text: t('hookStep2Desc') });
+    const snippet = JSON.stringify({ hooks: { PostToolUse: [{ matcher: 'Read|Write|Edit|MultiEdit', hooks: [{ type: 'command', command: 'node "' + script + '"' }] }] } }, null, 2);
+    contentEl.createEl('pre', { cls: 'cg-code', text: snippet });
+    new Setting(contentEl).addButton((b) => b.setButtonText(t('hookCopy')).onClick(async () => { await navigator.clipboard.writeText(snippet); new Notice(t('hookCopied')); }));
+    contentEl.createEl('p', { cls: 'setting-item-description', text: t('hookOther') });
+  }
+  onClose() { this.contentEl.empty(); }
 }
