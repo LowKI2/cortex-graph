@@ -113,7 +113,7 @@ function prep() {
 }
 function step() {
   const CH = -9 * P.repel * alpha, GR = 0.06 * P.center * alpha, LK = P.link, DIST = P.dist;
-  const MAXD2 = Math.pow(Math.max(400, DIST * 16), 2), d3 = dim === 3;
+  const MAXD2 = Math.pow(P.range || Math.max(400, DIST * 16), 2), d3 = dim === 3;
   repel(CH, MAXD2);
   for (let k = 0; k < m; k++) {
     const a = edges[2 * k], b = edges[2 * k + 1];

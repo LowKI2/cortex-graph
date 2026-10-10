@@ -6,10 +6,10 @@ import SIM_SRC from './sim.worker.js';
 
 export const VIEW_TYPE = 'cortex-graph-view';
 
-export const STYLE_KEYS = ['center', 'repel', 'link', 'dist', 'nodeSize', 'degSize', 'glow', 'line', 'font', 'fontGrow', 'boldFrom', 'labelFrom', 'maxLabels'];
-const FORCE_KEYS = new Set(['center', 'repel', 'link', 'dist']);
+export const STYLE_KEYS = ['center', 'repel', 'link', 'dist', 'range', 'nodeSize', 'degSize', 'glow', 'line', 'font', 'fontGrow', 'boldFrom', 'labelFrom', 'maxLabels'];
+const FORCE_KEYS = new Set(['center', 'repel', 'link', 'dist', 'range']);
 const PANEL = [
-  ['secForces'], ['center', 0, 1, 0.01], ['repel', 0, 20, 0.1], ['link', 0, 1, 0.01], ['dist', 8, 150, 1],
+  ['secForces'], ['center', 0, 5, 0.05], ['range', 60, 2000, 10], ['repel', 0, 20, 0.1], ['link', 0, 1, 0.01], ['dist', 8, 150, 1],
   ['secNodes'], ['nodeSize', 0.3, 3, 0.05], ['degSize', 0, 3, 0.05], ['glow', 0.2, 2.5, 0.05], ['line', 0.2, 3, 0.05],
   ['secLabels'], ['font', 8, 22, 1], ['fontGrow', 0, 2, 0.05], ['boldFrom', 1, 60, 1], ['labelFrom', 0, 60, 1], ['maxLabels', 0, 200, 5],
 ];
@@ -110,7 +110,7 @@ export class CortexGraphView extends ItemView {
   }
 
   styleObj() { const s = this.plugin.settings; const o = { rotate: s.rotate }; for (const k of STYLE_KEYS) o[k] = s.style[k]; return o; }
-  simParams() { const s = this.plugin.settings.style; return { center: s.center, repel: s.repel, link: s.link, dist: s.dist }; }
+  simParams() { const s = this.plugin.settings.style; return { center: s.center, repel: s.repel, link: s.link, dist: s.dist, range: s.range }; }
 
   applyTheme() {
     if (!this.R || !this.R.active) return;
