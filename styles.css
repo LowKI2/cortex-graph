@@ -108,3 +108,6 @@
 .cg-swatches { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
 .modal .cg-swatches button.cg-swatch, .modal .cg-swatches button.cg-swatch:hover { width: 30px; height: 30px; padding: 0; border-radius: 50%; background-color: var(--cg-sw); border: 2px solid transparent; box-shadow: none; }
 .modal .cg-swatches button.cg-swatch.is-selected { border-color: var(--text-normal); box-shadow: 0 0 0 2px var(--background-primary) inset; }
+.cg-hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: 80%; text-align: center; padding: 8px 14px; border-radius: 12px;
+  background: var(--cg-glass); border: 1px solid var(--cg-border); color: var(--text-muted); font-size: var(--font-ui-small); pointer-events: none; z-index: 4; }
+.is-space .cg-hint { color: #c8c8dc; }

@@ -52,6 +52,7 @@ export class CortexGraphView extends ItemView {
     this.labels = root.createDiv({ cls: 'cg-labels' });
     this.anchor = root.createDiv({ cls: 'cg-anchor' });
     this.info = root.createDiv({ cls: 'cg-info' });
+    this.hint = root.createDiv({ cls: 'cg-hint' }); this.hint.toggle(false);
     this.legend = root.createDiv({ cls: 'cg-legend' }); this.legend.toggle(false);
     this.buildToolbar(root);
     this.buildNav(root);
@@ -261,11 +262,14 @@ export class CortexGraphView extends ItemView {
 
   highlightPath(path, folder) {
     if (!this.R || !this.R.active) return;
-    if (!path) { this.R.setHighlight(null); return; }
+    if (!path) { this.R.setHighlight(null); this.hint.toggle(false); return; }
     const set = new Set();
     if (folder) { const pre = path === '/' ? '' : path + '/'; this.G.nodes.forEach((nd, k) => { if (nd.note && nd.note.path.startsWith(pre)) set.add(k); }); }
     else { const k = this.G.idx.get(path); if (k != null) set.add(k); }
     this.R.setHighlight(set);
+    const name = path.split('/').pop().replace(/\.md$/, '');
+    this.hint.setText(t(folder ? 'hintFolderHidden' : 'hintHidden', name));
+    this.hint.toggle(set.size === 0);
   }
 
   // ============================================================ interaction
