@@ -34,7 +34,7 @@ Works on **desktop and mobile** (touch controls included).
 - **Controls** – keyboard and mouse bindings shown and editable in the panel (two keys per action, drag buttons, wheel direction, rotation speed).
 - **Base form** – keep the whole graph inside a sphere, pyramid (one base corner per top-level folder, core at the apex), cube or a brain (side view), with top-level folders gathered in their own regions (brain: one lobe per folder, biggest folder frontal).
 - **Labels** – choose the font and a glow, shadow or background in the note's folder color.
-- **Look** – separate sliders for node brightness, glow, line thickness and tapered line ends at nodes.
+- **Look** – nodes are drawn as solid shapes in their color with a separate glow on top; lines are real ribbons (thickness, tapered ends with length) with their own glow. Every part has its own slider.
 - **Node shapes** – circle, ring, star, diamond, square: per folder or note (right-click → Appearance…, also sets weight), via the `form` property, or automatically by importance with a percentage slider per shape.
 - **Camera focus** – a click flies to the note; a click on empty space returns to the previous view.
 - **Automatic priority** – names and font sizes follow the importance of a note, not just its link count: links across projects and areas count fully, links inside one project (e.g. chapters of a split document) only a little. A `priority` property (1–5 or low/medium/high) and folder weights refine it.
