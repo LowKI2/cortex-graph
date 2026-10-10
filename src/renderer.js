@@ -58,7 +58,7 @@ export class GraphRenderer {
 
   glowMaterial(coreAmt, fog) {
     return new ShaderMaterial({
-      uniforms: { uScale: { value: 300 }, uCore: { value: coreAmt }, uMin: { value: fog ? 0.5 : 0.0 }, uGlow: { value: 1.0 }, uTime: { value: 0 }, uLight: { value: 0 } },
+      uniforms: { uScale: { value: 300 }, uCore: { value: coreAmt }, uMin: { value: fog ? 0.5 : 0.0 }, uGlow: { value: 1.0 }, uSizeK: { value: 1.0 }, uTime: { value: 0 }, uLight: { value: 0 } },
       vertexShader: `
         attribute float size; attribute float alpha; attribute vec3 color; attribute float heat; attribute float shape;
         varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape;
@@ -72,7 +72,7 @@ export class GraphRenderer {
         }`,
       fragmentShader: `
         varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape;
-        uniform float uCore; uniform float uGlow; uniform float uTime; uniform float uLight;
+        uniform float uCore; uniform float uGlow; uniform float uSizeK; uniform float uTime; uniform float uLight;
         void main() {
           vec2 c = gl_PointCoord - 0.5;
           float d = length(c) * 2.0;
@@ -91,8 +91,10 @@ export class GraphRenderer {
             gl_FragColor = vec4(vColor * (0.75 + 0.25 * core), a * vAlpha);
             return;
           }
-          vec3 col = vColor * (halo * 0.95 * uGlow + core * 1.1) + vec3(1.0) * core * uCore;
-          gl_FragColor = vec4(col, clamp(halo * 0.9 * uGlow + core, 0.0, 1.0) * vAlpha);
+          // bigger nodes overlap more under additive blending – keep their brightness constant
+          float hk = uGlow * uSizeK;
+          vec3 col = vColor * (halo * 0.95 * hk + core * 1.1 * sqrt(uSizeK)) + vec3(1.0) * core * uCore * uSizeK;
+          gl_FragColor = vec4(col, clamp(halo * 0.9 * hk + core, 0.0, 1.0) * vAlpha);
         }`,
       transparent: true, depthWrite: false, blending: AdditiveBlending,
     });
@@ -402,6 +404,7 @@ export class GraphRenderer {
   setStyle(st) {
     this.style = Object.assign(this.style, st);
     this.nodeMat.uniforms.uGlow.value = this.style.glow;
+    this.nodeMat.uniforms.uSizeK.value = 1 / Math.max(1, this.style.nodeSize);
     this.refreshColors(); this.updateLabels(true);
   }
 
