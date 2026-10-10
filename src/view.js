@@ -436,6 +436,7 @@ export class CortexGraphView extends ItemView {
       return b;
     });
     const tb = (icon, label, fn) => { const b = bar.createEl('button', { cls: 'cg-tool clickable-icon', attr: { 'aria-label': label } }); setIcon(b, icon); b.onclick = fn; return b; };
+    this.btnLabels = tb('type', t('sLabels'), () => { this.plugin.settings.labels = !this.plugin.settings.labels; this.plugin.saveSettings(); this.plugin.refreshViews('style'); this.plugin.views().forEach((v) => v.updateToolbar()); });
     this.btnActivity = tb('flame', t('activity'), () => { this.activity = !this.activity; this.plugin.settings.activity = this.activity; this.plugin.saveSettings(); this.updateToolbar(); this.applyHeat(); });
     this.btnProblems = tb('stethoscope', t('problems'), async () => { this.problems = !this.problems; this.updateToolbar(); await this.rebuild(true); this.R.resetView(); });
     this.btnPanel = tb('sliders-horizontal', t('panel'), () => { const v = !this.panel.isShown(); this.panel.toggle(v); if (v) { this.fillPanel(); this.hideSheet(); } this.updateToolbar(); });
@@ -449,6 +450,7 @@ export class CortexGraphView extends ItemView {
     this.depthSeg.toggle(local);
     this.depthBtns.forEach((b, i) => b.toggleClass('is-active', i + 1 === this.depth));
     this.btnActivity.toggleClass('is-active', this.activity);
+    this.btnLabels.toggleClass('is-active', this.plugin.settings.labels);
     this.btnProblems.toggleClass('is-active', this.problems);
     if (this.panel) this.btnPanel.toggleClass('is-active', this.panel.isShown());
   }
