@@ -11,7 +11,7 @@ const FORCE_KEYS = new Set(['center', 'repel', 'link', 'dist', 'range']);
 const PANEL = [
   ['secForces'], ['center', 0, 5, 0.05], ['range', 60, 2000, 10], ['repel', 0, 20, 0.1], ['link', 0, 1, 0.01], ['dist', 8, 150, 1],
   ['secNodes'], ['nodeSize', 0.3, 3, 0.05], ['dimOthers', 0, 0.6, 0.01], ['degSize', 0, 3, 0.05], ['glow', 0.2, 2.5, 0.05], ['line', 0.2, 3, 0.05],
-  ['secLabels'], ['font', 8, 22, 1], ['fontGrow', 0, 2, 0.05], ['labelFrom', 0, 60, 1], ['boldFrom', 1, 60, 1], ['maxLabels', 0, 200, 5],
+  ['secLabels'], ['font', 4, 22, 1], ['fontGrow', 0, 3, 0.05], ['labelFrom', 0, 60, 1], ['boldFrom', 1, 60, 1], ['maxLabels', 0, 200, 5],
 ];
 /* playback speed: vault time per second of playback */
 const TL_RATES = [[1000, 'tlRateSec'], [60000, 'tlRateMin'], [3600000, 'tlRateHour'], [86400000, 'tlRateDay'], [604800000, 'tlRateWeek'], [2592000000, 'tlRateMonth']];

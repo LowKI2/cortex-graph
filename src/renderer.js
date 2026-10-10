@@ -427,7 +427,8 @@ export class GraphRenderer {
       const k = want[i], p = this.project(k);
       if (p.z > 1 || p.z < -1) { el.toggle(false); continue; }
       const nm = nodes[k].label;
-      const fs = st.font * (1 + st.fontGrow * Math.sqrt(rk(nodes[k]) / this.maxDeg)) * (k === sel ? 1.15 : 1);
+      // log scale: spreads the many small notes apart from the hubs instead of squeezing them together
+      const fs = st.font * (1 + st.fontGrow * 2.5 * Math.log1p(rk(nodes[k])) / Math.log1p(this.maxDeg)) * (k === sel ? 1.15 : 1);
       const bold = k === sel || k === this.hover || rk(nodes[k]) >= st.boldFrom;
       const w = Math.min(40, nm.length) * fs * 0.56 + 6;
       const r = [p.x - w / 2, p.y + 8, p.x + w / 2, p.y + 10 + fs * 1.3];
