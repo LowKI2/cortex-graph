@@ -8,7 +8,7 @@ const STYLE_DEFAULTS = { center: 2, repel: 10, link: 1, dist: 32, range: 250, no
   font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, dimOthers: 0.04 };
 const DEFAULTS = {
   layout: '3d', background: 'space', colorBy: 'obsidian', filters: true, orphans: false, labels: true, rotate: true,
-  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, style: Object.assign({}, STYLE_DEFAULTS),
+  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], style: Object.assign({}, STYLE_DEFAULTS),
 };
 
 export default class CortexGraphPlugin extends Plugin {
@@ -39,6 +39,8 @@ export default class CortexGraphPlugin extends Plugin {
       for (const fc of [this.settings.folderColors, this.settings.folderWeights]) {
         for (const k of Object.keys(fc)) if (k === oldPath || k.startsWith(oldPath + '/')) { fc[file.path + k.slice(oldPath.length)] = fc[k]; delete fc[k]; changed = true; }
       }
+      const hf = this.settings.hiddenFolders;
+      hf.forEach((k, i) => { if (k === oldPath || k.startsWith(oldPath + '/')) { hf[i] = file.path + k.slice(oldPath.length); changed = true; } });
       if (changed) this.saveSettings();
       this.fc.requestRefresh();
     }));
@@ -83,6 +85,7 @@ export default class CortexGraphPlugin extends Plugin {
     this.settings = Object.assign({}, DEFAULTS, d);
     this.settings.folderColors = Object.assign({}, d.folderColors || {});
     this.settings.folderWeights = Object.assign({}, d.folderWeights || {});
+    this.settings.hiddenFolders = Array.isArray(d.hiddenFolders) ? d.hiddenFolders.slice() : [];
     this.settings.style = Object.assign({}, STYLE_DEFAULTS, d.style || {});
   }
   async saveSettings() { await this.saveData(this.settings); }

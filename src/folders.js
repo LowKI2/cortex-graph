@@ -59,7 +59,9 @@ export class FolderColors {
       root.toggleClass('cg-fc-rows', mode === 'rows');
       root.querySelectorAll('.nav-folder-title[data-path]').forEach((title) => {
         const item = title.parentElement; if (!item) return;
-        const c = mode === 'off' ? null : this.colorOf(title.getAttribute('data-path') || '');
+        const fp = title.getAttribute('data-path') || '';
+        item.toggleClass('cg-fc-hidden', (this.plugin.settings.hiddenFolders || []).includes(fp));
+        const c = mode === 'off' ? null : this.colorOf(fp);
         if (c) { item.addClass('cg-fc'); item.setCssProps({ '--cg-fc': c }); }
         else if (item.hasClass('cg-fc')) { item.removeClass('cg-fc'); item.setCssProps({ '--cg-fc': '' }); }
       });
@@ -72,6 +74,7 @@ export class FolderColors {
     for (const root of this.explorers()) {
       root.removeClass('cg-fc-rows');
       root.querySelectorAll('.cg-fc').forEach((el) => { el.removeClass('cg-fc'); el.setCssProps({ '--cg-fc': '' }); });
+      root.querySelectorAll('.cg-fc-hidden').forEach((el) => el.removeClass('cg-fc-hidden'));
     }
   }
 
@@ -95,6 +98,16 @@ export class FolderColors {
   addMenu(menu, file) {
     if (!(file instanceof TFolder) || file.isRoot()) return;
     menu.addItem((i) => i.setTitle(t('folderColor')).setIcon('palette').onClick(() => new FolderColorModal(this, file.path).open()));
+    const hid = this.plugin.settings.hiddenFolders || (this.plugin.settings.hiddenFolders = []);
+    const isHid = hid.includes(file.path);
+    menu.addItem((i) => i.setTitle(t(isHid ? 'folderShow' : 'folderHide')).setIcon(isHid ? 'eye' : 'eye-off').onClick(async () => {
+      const list = this.plugin.settings.hiddenFolders;
+      const at = list.indexOf(file.path);
+      if (at >= 0) list.splice(at, 1); else list.push(file.path);
+      await this.plugin.saveSettings();
+      this.apply();
+      this.plugin.refreshViews('data');
+    }));
   }
 }
 

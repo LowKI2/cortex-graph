@@ -15,6 +15,9 @@ Works on **desktop and mobile** (touch controls included).
   - right-click shows the normal file menu
 - **Local graph** that follows the active note (depth 1–3), also in the sidebar.
 - **Explorer hover** – hovering a file in the file explorer lights up its node, hovering a folder lights up all notes inside.
+- **Time lapse and tag filter** – watch your vault grow by creation date, modification date or any date property; limit the time range, filter by tag, choose the playback duration.
+- **Tooltip** on hover with folder, links, backlinks, tags and last change.
+- **Hide folders** – right-click a folder → *Hide in graph*.
 - **Activity heat** – recently edited notes glow warmer and pulse, so you see at a glance where work is happening.
 - **Shortest path** between two notes – pick "Path from here", then the target. Also available as a command.
 - **Fly-to search** – type a name, the camera flies to the note.

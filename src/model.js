@@ -85,7 +85,7 @@ export function buildGraph(notes, o) {
       for (const j of n.back) if (!seen.has(j)) { seen.set(j, d + 1); q.push(j); }
     }
     list = [...seen.keys()].map((i) => notes[i]);
-  } else list = o.filter ? notes.filter((n) => passesFilter(n, o.filter)) : notes.slice();
+  } else list = notes.filter((n) => (!o.filter || passesFilter(n, o.filter)) && !(o.exclude && o.exclude(n)));
 
   const inSet = new Map(list.map((n, k) => [n.i, k]));
   const pairs = new Set(); const edges = [];
