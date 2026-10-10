@@ -6,10 +6,10 @@ import { CortexGraphView, VIEW_TYPE, DEFAULT_KEYS, DEFAULT_MOUSE, KEY_ACTIONS } 
 import { t } from './i18n';
 
 export const SHAPES = ['kreis', 'ring', 'stern', 'raute', 'quadrat'];
-const STYLE_DEFAULTS = { center: 2, repel: 10, link: 1, dist: 32, range: 250, nodeSize: 1, degSize: 1, glow: 1, line: 1,
+const STYLE_DEFAULTS = { shapeSize: 1, shapeGroup: 0.4, center: 2, repel: 10, link: 1, dist: 32, range: 250, nodeSize: 1, degSize: 1, glow: 1, line: 1,
   font: 4, fontGrow: 1.45, boldFrom: 15, labelFrom: 4, maxLabels: 150, dimOthers: 0.04, taper: 1, taperBright: 0.6, nodeBright: 1, shStern: 2, shRaute: 0, shQuadrat: 0, shRing: 0 };
 const DEFAULTS = {
-  layout: '3d', background: 'space', colorBy: 'obsidian', filters: true, orphans: false, labels: true, rotate: true,
+  layout: '3d', shape: 'free', background: 'space', colorBy: 'obsidian', filters: true, orphans: false, labels: true, rotate: true,
   clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], folderLinks: 'hidden', rankBy: 'auto', recSave: 'ask', focusCamera: true, staleDays: 90, shapeDefault: 'kreis', hubStars: true, folderShapes: {}, noteShapes: {}, noteWeights: {}, claudeLive: true, galaxies: true, views: [], style: Object.assign({}, STYLE_DEFAULTS),
 };
 

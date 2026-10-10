@@ -6,11 +6,11 @@ import SIM_SRC from './sim.worker.js';
 
 export const VIEW_TYPE = 'cortex-graph-view';
 
-export const STYLE_KEYS = ['center', 'repel', 'link', 'dist', 'range', 'nodeSize', 'degSize', 'glow', 'line', 'font', 'fontGrow', 'boldFrom', 'labelFrom', 'maxLabels', 'dimOthers', 'taper', 'taperBright', 'nodeBright', 'shStern', 'shRaute', 'shQuadrat', 'shRing'];
+export const STYLE_KEYS = ['center', 'repel', 'link', 'dist', 'range', 'nodeSize', 'degSize', 'glow', 'line', 'font', 'fontGrow', 'boldFrom', 'labelFrom', 'maxLabels', 'dimOthers', 'shapeSize', 'shapeGroup', 'taper', 'taperBright', 'nodeBright', 'shStern', 'shRaute', 'shQuadrat', 'shRing'];
 const SHAPE_KEYS = new Set(['shStern', 'shRaute', 'shQuadrat', 'shRing']);
-const FORCE_KEYS = new Set(['center', 'repel', 'link', 'dist', 'range']);
+const FORCE_KEYS = new Set(['center', 'repel', 'link', 'dist', 'range', 'shapeSize', 'shapeGroup']);
 const PANEL = [
-  ['secForces'], ['center', 0, 5, 0.05], ['range', 60, 2000, 10], ['repel', 0, 20, 0.1], ['link', 0, 1, 0.01], ['dist', 8, 150, 1],
+  ['secForces'], ['shapeSize', 0.4, 2.5, 0.05], ['shapeGroup', 0, 1, 0.05], ['center', 0, 5, 0.05], ['range', 60, 2000, 10], ['repel', 0, 20, 0.1], ['link', 0, 1, 0.01], ['dist', 8, 150, 1],
   ['secNodes'], ['nodeSize', 0.3, 3, 0.05], ['dimOthers', 0, 0.6, 0.01], ['degSize', 0, 3, 0.05], ['nodeBright', 0.1, 1.5, 0.05], ['glow', 0, 2.5, 0.05], ['line', 0.2, 3, 0.05], ['taper', 0, 3, 0.05], ['taperBright', 0, 2, 0.05],
   ['secLabels'], ['font', 2, 10, 0.5], ['fontGrow', 0, 3, 0.05], ['labelFrom', 0, 60, 1], ['boldFrom', 1, 60, 1], ['maxLabels', 0, 200, 5],
   ['secShapes'], ['shStern', 0, 25, 0.5], ['shRaute', 0, 25, 0.5], ['shQuadrat', 0, 25, 0.5], ['shRing', 0, 25, 0.5],
@@ -141,7 +141,24 @@ export class CortexGraphView extends ItemView {
   }
 
   styleObj() { const s = this.plugin.settings; const o = { rotate: s.rotate, labelFont: s.labelFont || 'ui', labelStyle: s.labelStyle || 'glow' }; for (const k of STYLE_KEYS) o[k] = s.style[k]; return o; }
-  simParams() { const s = this.plugin.settings.style; return { center: s.center, repel: s.repel, link: s.link, dist: s.dist, range: s.range }; }
+  simParams() {
+    const ps = this.plugin.settings, s = ps.style, free = this.mode === 'local' || !!this.focusPath;
+    return { center: s.center, repel: s.repel, link: s.link, dist: s.dist, range: s.range,
+      shape: free ? 'free' : ps.shape || 'free', shapeSize: s.shapeSize, shapeGroup: s.shapeGroup, ngroups: this.groupCount || 0 };
+  }
+
+  /* top-level folder index per node, biggest folder first (for the base form regions) */
+  groupArray() {
+    const nodes = this.G.nodes, top = (nd) => nd.note ? nd.note.folder || '' : nd.anchor && nd.key ? String(nd.key).slice(7).split('/')[0] : '';
+    const cnt = new Map();
+    for (const nd of nodes) { const f = top(nd); if (f && !nd.hidden) cnt.set(f, (cnt.get(f) || 0) + 1); }
+    const order = [...cnt.entries()].sort((a, b) => b[1] - a[1]).map((e) => e[0]);
+    this.groupNames = order; this.groupCount = order.length;
+    const idx = new Map(order.map((f, i) => [f, i]));
+    const g = new Int32Array(nodes.length);
+    nodes.forEach((nd, k) => { const f = top(nd); g[k] = f && idx.has(f) ? idx.get(f) : -1; });
+    return g;
+  }
 
   applyTheme() {
     if (!this.R || !this.R.active) return;
@@ -241,7 +258,8 @@ export class CortexGraphView extends ItemView {
       this.R.setPositions(ev.data.pos);
       if (ev.data.done && focus == null) this.savePositions();
     };
-    w.postMessage({ cmd: 'init', n, dim: flat ? 2 : 3, edges, pos, params: this.simParams(), alpha: alpha0 });
+    const groups = this.groupArray();
+    w.postMessage({ cmd: 'init', n, dim: flat ? 2 : 3, edges, pos, groups, params: this.simParams(), alpha: alpha0 });
   }
 
   savePositions() {
@@ -1092,6 +1110,15 @@ export class CortexGraphView extends ItemView {
       d.value = ps[key] || def;
       d.onchange = () => { ps[key] = d.value; this.plugin.saveSettings(); this.plugin.views().forEach((v) => v.R && v.R.setStyle(v.styleObj())); };
     };
+    if (secs.secForces) {
+      const row = secs.secForces.createEl('label', { cls: 'cg-row cg-row-check' });
+      row.createSpan({ text: t('baseShape') });
+      const d = row.createEl('select', { cls: 'dropdown' });
+      for (const o of ['free', 'circle', 'triangle', 'square', 'brain']) d.createEl('option', { value: o, text: t('baseShape_' + o) });
+      d.value = ps.shape || 'free';
+      d.onchange = () => { ps.shape = d.value; this.plugin.saveSettings(); this.plugin.views().forEach((v) => v.simSend({ cmd: 'params', params: v.simParams() })); };
+      secs.secForces.insertBefore(row, secs.secForces.children[1] || null);
+    }
     if (secs.secLabels) {
       pick(secs.secLabels, 'labelFont', 'labelFont', ['ui', 'text', 'sans', 'serif', 'mono', 'narrow', 'round'], 'ui');
       pick(secs.secLabels, 'labelStyle', 'labelStyle', ['glow', 'shadow', 'pill', 'none'], 'glow');
