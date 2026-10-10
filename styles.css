@@ -97,3 +97,14 @@
 .cg-root.is-mobile .cg-info { bottom: auto; top: 88px; left: auto; right: 8px; }
 .cg-suggest-item > span:nth-child(2) { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cg-suggest-path { flex: 0 1 40%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+
+/* Folder colors in the file explorer */
+.cg-fc > .nav-folder-title { box-shadow: inset 3px 0 0 var(--cg-fc); background: color-mix(in srgb, var(--cg-fc) 16%, transparent); }
+.cg-fc > .nav-folder-title .nav-folder-title-content { color: color-mix(in srgb, var(--cg-fc) 70%, var(--text-normal)); font-weight: var(--font-semibold); }
+.cg-fc-rows .cg-fc > .nav-folder-children .nav-file-title,
+.cg-fc-rows .cg-fc > .nav-folder-children .nav-folder-title { background: color-mix(in srgb, var(--cg-fc) 7%, transparent); }
+.cg-fc-rows .cg-fc > .nav-folder-children .nav-file-title:hover,
+.cg-fc-rows .cg-fc > .nav-folder-children .nav-folder-title:hover { background: color-mix(in srgb, var(--cg-fc) 20%, transparent); }
+.cg-swatches { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
+.modal .cg-swatches button.cg-swatch, .modal .cg-swatches button.cg-swatch:hover { width: 30px; height: 30px; padding: 0; border-radius: 50%; background-color: var(--cg-sw); border: 2px solid transparent; box-shadow: none; }
+.modal .cg-swatches button.cg-swatch.is-selected { border-color: var(--text-normal); box-shadow: 0 0 0 2px var(--background-primary) inset; }

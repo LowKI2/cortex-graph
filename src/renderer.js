@@ -13,6 +13,7 @@ function hexToRgb(h) {
 function boost(rgb) { const mx = Math.max(rgb[0], rgb[1], rgb[2]) || 1; return rgb.map((c) => Math.min(1, 0.15 + (c / mx) * 0.95)); }
 function mix(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
 const HEAT_RGB = [1, 0.62, 0.22];
+const rk = (nd) => nd.deg * (nd.w || 1); // label/size rank: connections x folder weight
 const PATH_RGB = [1, 0.86, 0.35];
 
 export class GraphRenderer {
@@ -128,7 +129,7 @@ export class GraphRenderer {
   setGraph(nodes, edges, adj) {
     this.nodes = nodes; this.edges = edges; this.adj = adj; this.sel = -1; this.dragK = -1; this.hover = -1;
     this.pathSet = null; this.pathEdges = null;
-    this.maxDeg = Math.max(1, ...nodes.map((nd) => nd.deg));
+    this.maxDeg = Math.max(1, ...nodes.map((nd) => nd.deg * (nd.w || 1)));
     if (this.points) { this.root.remove(this.points); this.points.geometry.dispose(); }
     if (this.lines) { this.root.remove(this.lines); this.lines.geometry.dispose(); }
     const n = nodes.length;
@@ -162,7 +163,7 @@ export class GraphRenderer {
       const h = this.heat ? this.heat[k] : 0;
       if (h > 0) rgb = mix(rgb, HEAT_RGB, Math.min(0.75, h * 0.8));
       this.baseColor.push(rgb);
-      this.baseSize.push((14 * this.style.nodeSize + Math.sqrt(nd.deg) * 7 * this.style.degSize) * (1 + h * 0.9) * (nd.ghost ? 0.8 : 1));
+      this.baseSize.push((14 * this.style.nodeSize + Math.sqrt(nd.deg) * 7 * this.style.degSize) * (1 + h * 0.9) * (nd.ghost ? 0.8 : 1) * (nd.w || 1));
     }
     this.paint();
   }
@@ -337,15 +338,15 @@ export class GraphRenderer {
     if (this.showLabels && nodes.length) {
       if (this.pathSet) want = [...this.pathSet];
       else if (sel >= 0) want = [sel, ...this.adj[sel]].slice(0, Math.max(28, st.maxLabels));
-      else if (this.dimSet) want = [...this.dimSet].sort((a, b) => nodes[b].deg - nodes[a].deg).slice(0, Math.max(40, st.maxLabels));
+      else if (this.dimSet) want = [...this.dimSet].sort((a, b) => rk(nodes[b]) - rk(nodes[a])).slice(0, Math.max(40, st.maxLabels));
       else {
         const idx = [];
-        for (let k = 0; k < nodes.length; k++) if (nodes[k].deg >= st.labelFrom) idx.push(k);
-        idx.sort((a, b) => nodes[b].deg - nodes[a].deg);
+        for (let k = 0; k < nodes.length; k++) if (rk(nodes[k]) >= st.labelFrom) idx.push(k);
+        idx.sort((a, b) => rk(nodes[b]) - rk(nodes[a]));
         want = idx.slice(0, st.maxLabels);
       }
     }
-    if (this.hl && this.hl.size <= 60) want = [...this.hl, ...want.filter((k) => !this.hl.has(k))];
+    if (this.hl) want = [...this.hl].sort((a, b) => rk(nodes[b]) - rk(nodes[a])).slice(0, Math.max(40, st.maxLabels)); // only the hovered folder/file
     if (this.hover >= 0 && !want.includes(this.hover)) want.unshift(this.hover);
     while (this.labelPool.length < want.length) this.labelPool.push(layer.createDiv({ cls: 'cg-label' }));
     const placed = [];
@@ -355,8 +356,8 @@ export class GraphRenderer {
       const k = want[i], p = this.project(k);
       if (p.z > 1 || p.z < -1) { el.toggle(false); continue; }
       const nm = nodes[k].label;
-      const fs = st.font * (1 + st.fontGrow * Math.sqrt(nodes[k].deg / this.maxDeg)) * (k === sel ? 1.15 : 1);
-      const bold = k === sel || k === this.hover || nodes[k].deg >= st.boldFrom;
+      const fs = st.font * (1 + st.fontGrow * Math.sqrt(rk(nodes[k]) / this.maxDeg)) * (k === sel ? 1.15 : 1);
+      const bold = k === sel || k === this.hover || rk(nodes[k]) >= st.boldFrom;
       const w = Math.min(40, nm.length) * fs * 0.56 + 6;
       const r = [p.x - w / 2, p.y + 8, p.x + w / 2, p.y + 10 + fs * 1.3];
       const prio = k === sel || k === this.hover || (this.hl && this.hl.size === 1 && this.hl.has(k));

@@ -56,7 +56,8 @@ export function passesFilter(n, cfg) {
 }
 
 /* colorBy: 'obsidian' (groups from graph.json, falls back to folder), 'folder', 'none' */
-export function assignColors(notes, cfg, colorBy) {
+export function assignColors(notes, cfg, colorBy, folderColors) {
+  const fcKeys = folderColors ? Object.keys(folderColors).sort((a, b) => b.length - a.length) : [];
   const useGroups = colorBy === 'obsidian' && cfg.groups.length > 0;
   const folders = [...new Set(notes.map((n) => n.folder))].sort();
   const fc = new Map(folders.map((f, i) => [f, PALETTE[i % PALETTE.length]]));
@@ -64,6 +65,7 @@ export function assignColors(notes, cfg, colorBy) {
     let c = null;
     if (useGroups) { for (const g of cfg.groups) if (g.terms.some((t) => matchTerm(n, t))) { c = g.color; break; } }
     else if (colorBy !== 'none') c = fc.get(n.folder);
+    for (const f of fcKeys) if (n.path.startsWith(f + '/')) { c = folderColors[f]; break; }
     n.color = c || DEFAULT_COLOR;
   }
 }
@@ -159,4 +161,11 @@ export function heatOf(mtime, now, halfLifeHours) {
   const age = Math.max(0, now - mtime) / 3600000;
   const h = Math.pow(0.5, age / Math.max(0.1, halfLifeHours));
   return h < 0.02 ? 0 : h;
+}
+
+/* value of the deepest configured folder containing path (folder map: {'a/b': value}) */
+export function deepestFolderValue(map, path) {
+  let best = null, len = -1;
+  for (const f in map) if (path.startsWith(f + '/') && f.length > len) { best = map[f]; len = f.length; }
+  return best;
 }

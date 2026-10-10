@@ -1,4 +1,6 @@
-import { Plugin, PluginSettingTab, Setting, FuzzySuggestModal, debounce } from 'obsidian';
+import { Plugin, PluginSettingTab, Setting, FuzzySuggestModal, TFolder, debounce, getAllTags } from 'obsidian';
+import { parseGraphCfg } from './model';
+import { FolderColors } from './folders';
 import { CortexGraphView, VIEW_TYPE } from './view';
 import { t } from './i18n';
 
@@ -6,7 +8,7 @@ const STYLE_DEFAULTS = { center: 0.5, repel: 10, link: 1, dist: 32, nodeSize: 1,
   font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30 };
 const DEFAULTS = {
   layout: '3d', background: 'space', colorBy: 'obsidian', filters: true, orphans: false, labels: true, rotate: true,
-  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, style: Object.assign({}, STYLE_DEFAULTS),
+  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, style: Object.assign({}, STYLE_DEFAULTS),
 };
 
 export default class CortexGraphPlugin extends Plugin {
@@ -24,13 +26,63 @@ export default class CortexGraphPlugin extends Plugin {
     });
     this.addCommand({ id: 'find-path', name: t('cmdPath'), callback: () => this.findPath() });
     this.addSettingTab(new CortexGraphSettingTab(this.app, this));
+
+    // folder colors in the file explorer
+    this.fc = new FolderColors(this);
+    this.app.workspace.onLayoutReady(() => { this.fc.watch(); this.fc.refresh(); });
+    this.registerEvent(this.app.workspace.on('layout-change', () => { this.fc.watch(); this.fc.requestApply(); }));
+    this.registerEvent(this.app.metadataCache.on('resolved', () => this.fc.requestRefresh()));
+    this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => this.fc.addMenu(menu, file)));
+    this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
+      if (!(file instanceof TFolder)) return;
+      let changed = false;
+      for (const fc of [this.settings.folderColors, this.settings.folderWeights]) {
+        for (const k of Object.keys(fc)) if (k === oldPath || k.startsWith(oldPath + '/')) { fc[file.path + k.slice(oldPath.length)] = fc[k]; delete fc[k]; changed = true; }
+      }
+      if (changed) this.saveSettings();
+      this.fc.requestRefresh();
+    }));
   }
 
-  onunload() { try { delete window.__THREE__; } catch { /* ignore */ } }
+  // ------------------------------------------------ shared data access
+  collect() {
+    const app = this.app, files = app.vault.getMarkdownFiles();
+    const byPath = new Map();
+    const notes = files.map((f, i) => {
+      const cache = app.metadataCache.getFileCache(f);
+      const tags = cache ? (getAllTags(cache) || []).map((x) => x.replace(/^#/, '')) : [];
+      const n = { i, file: f, path: f.path, name: f.basename, folder: f.path.includes('/') ? f.path.split('/')[0] : '',
+        tags, fm: (cache && cache.frontmatter) || {}, mtime: f.stat.mtime, ctime: f.stat.ctime, out: new Set(), back: new Set(), unresolved: [] };
+      byPath.set(f.path, n);
+      return n;
+    });
+    const rl = app.metadataCache.resolvedLinks || {}, ul = app.metadataCache.unresolvedLinks || {};
+    for (const src in rl) {
+      const a = byPath.get(src); if (!a) continue;
+      for (const dst in rl[src]) { const b = byPath.get(dst); if (b && b !== a) { a.out.add(b.i); b.back.add(a.i); } }
+    }
+    for (const src in ul) { const a = byPath.get(src); if (a) a.unresolved = Object.keys(ul[src]); }
+    return { notes, byPath };
+  }
+
+  async readGraphCfg() {
+    try {
+      const p = this.app.vault.configDir + '/graph.json';
+      if (await this.app.vault.adapter.exists(p)) return parseGraphCfg(await this.app.vault.adapter.read(p));
+    } catch { /* ignore */ }
+    return parseGraphCfg(null);
+  }
+
+  onunload() {
+    if (this.fc) this.fc.clear();
+    try { delete window.__THREE__; } catch { /* ignore */ }
+  }
 
   async loadSettings() {
     const d = (await this.loadData()) || {};
     this.settings = Object.assign({}, DEFAULTS, d);
+    this.settings.folderColors = Object.assign({}, d.folderColors || {});
+    this.settings.folderWeights = Object.assign({}, d.folderWeights || {});
     this.settings.style = Object.assign({}, STYLE_DEFAULTS, d.style || {});
   }
   async saveSettings() { await this.saveData(this.settings); }
@@ -105,7 +157,10 @@ class CortexGraphSettingTab extends PluginSettingTab {
       .onChange((v) => { s.background = v; save('theme'); }));
     new Setting(el).setName(t('sColorBy')).setDesc(t('sColorByDesc')).addDropdown((d) => d
       .addOption('obsidian', t('sColorObsidian')).addOption('folder', t('sColorFolder')).addOption('none', t('sColorNone')).setValue(s.colorBy)
-      .onChange((v) => { s.colorBy = v; save('data'); }));
+      .onChange((v) => { s.colorBy = v; save('data'); p.fc.refresh(); }));
+    new Setting(el).setName(t('sExplorer')).setDesc(t('sExplorerDesc')).addDropdown((d) => d
+      .addOption('rows', t('sExplorerRows')).addOption('folders', t('sExplorerFolders')).addOption('off', t('sExplorerOff')).setValue(s.explorerColors)
+      .onChange((v) => { s.explorerColors = v; p.saveSettings(); p.fc.apply(); }));
     new Setting(el).setName(t('sFilters')).setDesc(t('sFiltersDesc')).addToggle((tg) => tg.setValue(s.filters).onChange((v) => { s.filters = v; save('data'); }));
     new Setting(el).setName(t('sOrphans')).addToggle((tg) => tg.setValue(s.orphans).onChange((v) => { s.orphans = v; save('data'); }));
     new Setting(el).setName(t('sLabels')).addToggle((tg) => tg.setValue(s.labels).onChange((v) => { s.labels = v; save('style'); p.views().forEach((w) => w.updateToolbar()); }));

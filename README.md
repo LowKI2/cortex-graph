@@ -19,6 +19,8 @@ Works on **desktop and mobile** (touch controls included).
 - **Shortest path** between two notes – pick "Path from here", then the target. Also available as a command.
 - **Fly-to search** – type a name, the camera flies to the note.
 - **Link health check** – notes without links, dead ends and unresolved links are colored, with counts.
+- **Folder appearance** – right-click a folder: pick its color and weight (normal, important, primary). Primary folders get bigger nodes and names regardless of links.
+- **Colored file explorer** – top-level folders (and optionally their notes) are tinted in the graph colors.
 - **Uses your graph view settings** – color groups and path filters of the core graph view are applied (optional).
 - **Obsidian-like controls** – center/repel/link forces, link distance, node size, size by connections, glow,
   line thickness, font size, font growth and bold labels by connections, label thresholds.

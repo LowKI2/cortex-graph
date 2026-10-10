@@ -1,6 +1,6 @@
-import { ItemView, Menu, Notice, TFile, getAllTags, prepareFuzzySearch, setIcon, debounce, Platform, moment } from 'obsidian';
+import { ItemView, Menu, Notice, TFile, prepareFuzzySearch, setIcon, debounce, Platform, moment } from 'obsidian';
 import { GraphRenderer } from './renderer';
-import { buildGraph, parseGraphCfg, assignColors, shortestPath, signature, heatOf, PROBLEM_COLORS } from './model';
+import { buildGraph, assignColors, deepestFolderValue, shortestPath, signature, heatOf, PROBLEM_COLORS } from './model';
 import { t } from './i18n';
 import SIM_SRC from './sim.worker.js';
 
@@ -125,40 +125,15 @@ export class CortexGraphView extends ItemView {
   }
 
   // ============================================================ data
-  collect() {
-    const app = this.app, files = app.vault.getMarkdownFiles();
-    const byPath = new Map();
-    const notes = files.map((f, i) => {
-      const cache = app.metadataCache.getFileCache(f);
-      const tags = cache ? (getAllTags(cache) || []).map((x) => x.replace(/^#/, '')) : [];
-      const n = { i, file: f, path: f.path, name: f.basename, folder: f.path.includes('/') ? f.path.split('/')[0] : '',
-        tags, fm: (cache && cache.frontmatter) || {}, mtime: f.stat.mtime, ctime: f.stat.ctime, out: new Set(), back: new Set(), unresolved: [] };
-      byPath.set(f.path, n);
-      return n;
-    });
-    const rl = app.metadataCache.resolvedLinks || {}, ul = app.metadataCache.unresolvedLinks || {};
-    for (const src in rl) {
-      const a = byPath.get(src); if (!a) continue;
-      for (const dst in rl[src]) { const b = byPath.get(dst); if (b && b !== a) { a.out.add(b.i); b.back.add(a.i); } }
-    }
-    for (const src in ul) { const a = byPath.get(src); if (a) a.unresolved = Object.keys(ul[src]); }
-    return { notes, byPath };
-  }
-
-  async readGraphCfg() {
-    try {
-      const p = this.app.vault.configDir + '/graph.json';
-      if (await this.app.vault.adapter.exists(p)) return parseGraphCfg(await this.app.vault.adapter.read(p));
-    } catch { /* ignore */ }
-    return parseGraphCfg(null);
-  }
+  collect() { return this.plugin.collect(); }
+  readGraphCfg() { return this.plugin.readGraphCfg(); }
 
   async rebuild(force) {
     if (!this.R || !this.R.active) return;
     const s = this.plugin.settings;
     const { notes, byPath } = this.collect();
     const cfg = await this.readGraphCfg();
-    assignColors(notes, cfg, s.colorBy);
+    assignColors(notes, cfg, s.colorBy, s.folderColors);
     this.notes = notes; this.byPath = byPath;
     let focus = null;
     if (this.mode === 'local') {
@@ -168,10 +143,12 @@ export class CortexGraphView extends ItemView {
       if (focus == null && !force && this.G.nodes.length) return; // keep last local graph
     } else if (this.focusPath && byPath.has(this.focusPath)) focus = byPath.get(this.focusPath).i;
     const G = buildGraph(notes, { focus, depth: this.depth, orphans: s.orphans, filter: s.filters && cfg.has ? cfg : null, problems: this.problems });
+    const fw = s.folderWeights || {};
+    for (const nd of G.nodes) nd.w = nd.note ? deepestFolderValue(fw, nd.note.path) || 1 : 1;
     const sig = signature(G) + '|' + this.mode + '|' + s.layout;
     const prevSel = this.sel >= 0 && this.G.nodes[this.sel] ? this.G.nodes[this.sel].key : null;
     if (!force && sig === this.sig) { // same structure: refresh colors + heat only
-      G.nodes.forEach((nd, k) => { if (this.G.nodes[k]) { this.G.nodes[k].note = nd.note; this.G.nodes[k].kind = nd.kind; } }); this.G.stats = G.stats;
+      G.nodes.forEach((nd, k) => { if (this.G.nodes[k]) { this.G.nodes[k].note = nd.note; this.G.nodes[k].kind = nd.kind; this.G.nodes[k].w = nd.w; } }); this.R.maxDeg = Math.max(1, ...this.G.nodes.map((nd) => nd.deg * (nd.w || 1))); this.G.stats = G.stats;
       this.R.refreshColors(); this.applyHeat(); this.applyOverlay(); this.updateInfo();
       return;
     }

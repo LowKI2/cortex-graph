@@ -78,6 +78,17 @@ const EN = {
   sHalf: 'Activity half-life (hours)',
   sHalfDesc: 'How fast the glow of recently edited notes fades.',
   sDepth: 'Local graph depth',
+  folderColor: 'Folder appearance…',
+  folderColorTitle: (p) => `Appearance of “${p}”`,
+  folderColorCustom: 'Color',
+  folderColorAny: 'Any color',
+  folderWeight: 'Weight in the graph',
+  folderWeightDesc: 'Primary folders get bigger nodes and names, independent of their links.',
+  weightNormal: 'Normal', weightImportant: 'Important', weightPrimary: 'Primary',
+  apply: 'Apply',
+  sExplorer: 'Color the file explorer',
+  sExplorerDesc: 'Uses the graph colors for top-level folders and your own folder colors (right-click a folder).',
+  sExplorerRows: 'Folders and their notes', sExplorerFolders: 'Folder names only', sExplorerOff: 'Off',
 };
 
 const DE = {
@@ -157,6 +168,17 @@ const DE = {
   sHalf: 'Halbwertszeit der Aktivität (Stunden)',
   sHalfDesc: 'Wie schnell das Leuchten zuletzt bearbeiteter Notizen nachlässt.',
   sDepth: 'Tiefe des lokalen Graphs',
+  folderColor: 'Ordner-Darstellung…',
+  folderColorTitle: (p) => `Darstellung von „${p}“`,
+  folderColorCustom: 'Farbe',
+  folderColorAny: 'Beliebige Farbe',
+  folderWeight: 'Gewichtung im Graph',
+  folderWeightDesc: 'Primäre Ordner bekommen größere Knoten und Namen, unabhängig von ihren Links.',
+  weightNormal: 'Normal', weightImportant: 'Wichtig', weightPrimary: 'Primär',
+  apply: 'Übernehmen',
+  sExplorer: 'Datei-Explorer einfärben',
+  sExplorerDesc: 'Nutzt die Graph-Farben für die Hauptordner und deine eigenen Ordnerfarben (Rechtsklick auf einen Ordner).',
+  sExplorerRows: 'Ordner und ihre Notizen', sExplorerFolders: 'Nur Ordnernamen', sExplorerOff: 'Aus',
 };
 
 let dict = null;
