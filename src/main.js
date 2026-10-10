@@ -8,7 +8,7 @@ const STYLE_DEFAULTS = { center: 2, repel: 10, link: 1, dist: 32, range: 250, no
   font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, dimOthers: 0.04 };
 const DEFAULTS = {
   layout: '3d', background: 'space', colorBy: 'obsidian', filters: true, orphans: false, labels: true, rotate: true,
-  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], folderLinks: 'hidden', galaxies: true, views: [], style: Object.assign({}, STYLE_DEFAULTS),
+  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], folderLinks: 'hidden', rankBy: 'auto', galaxies: true, views: [], style: Object.assign({}, STYLE_DEFAULTS),
 };
 
 export default class CortexGraphPlugin extends Plugin {
@@ -166,6 +166,9 @@ class CortexGraphSettingTab extends PluginSettingTab {
       .addOption('rows', t('sExplorerRows')).addOption('folders', t('sExplorerFolders')).addOption('off', t('sExplorerOff')).setValue(s.explorerColors)
       .onChange((v) => { s.explorerColors = v; p.saveSettings(); p.fc.apply(); }));
     new Setting(el).setName(t('sFilters')).setDesc(t('sFiltersDesc')).addToggle((tg) => tg.setValue(s.filters).onChange((v) => { s.filters = v; save('data'); }));
+    new Setting(el).setName(t('sRankBy')).setDesc(t('sRankByDesc')).addDropdown((d) => d
+      .addOption('auto', t('sRankAuto')).addOption('links', t('sRankLinks')).setValue(s.rankBy)
+      .onChange((v) => { s.rankBy = v; save('data'); }));
     new Setting(el).setName(t('sFolderLinks')).setDesc(t('sFolderLinksDesc')).addDropdown((d) => d
       .addOption('off', t('sFlOff')).addOption('hidden', t('sFlHidden')).addOption('lines', t('sFlLines')).setValue(s.folderLinks)
       .onChange((v) => { s.folderLinks = v; save('layout'); }));

@@ -1,6 +1,6 @@
 import { ItemView, Menu, Modal, Setting, Notice, TFile, prepareFuzzySearch, setIcon, debounce, Platform, moment } from 'obsidian';
 import { GraphRenderer } from './renderer';
-import { buildGraph, assignColors, deepestFolderValue, shortestPath, signature, heatOf, PROBLEM_COLORS } from './model';
+import { buildGraph, assignColors, deepestFolderValue, importance, shortestPath, signature, heatOf, PROBLEM_COLORS } from './model';
 import { t } from './i18n';
 import SIM_SRC from './sim.worker.js';
 
@@ -170,10 +170,11 @@ export class CortexGraphView extends ItemView {
     this.R.anchorLines = s.folderLinks === 'lines';
     const fw = s.folderWeights || {};
     for (const nd of G.nodes) nd.w = nd.note ? deepestFolderValue(fw, nd.note.path) || 1 : 1;
-    const sig = signature(G) + '|' + this.mode + '|' + s.layout + '|' + (s.hiddenFolders || []).join(',') + '|' + s.folderLinks;
+    if (s.rankBy !== 'links') importance(G.nodes); else for (const nd of G.nodes) nd.rank = null;
+    const sig = signature(G) + '|' + this.mode + '|' + s.layout + '|' + (s.hiddenFolders || []).join(',') + '|' + s.folderLinks + '|' + s.rankBy;
     const prevSel = this.sel >= 0 && this.G.nodes[this.sel] ? this.G.nodes[this.sel].key : null;
     if (!force && sig === this.sig) { // same structure: refresh colors + heat only
-      G.nodes.forEach((nd, k) => { if (this.G.nodes[k]) { this.G.nodes[k].note = nd.note; this.G.nodes[k].kind = nd.kind; this.G.nodes[k].w = nd.w; } }); this.R.maxDeg = Math.max(1, ...this.G.nodes.map((nd) => nd.deg * (nd.w || 1))); this.G.stats = G.stats;
+      G.nodes.forEach((nd, k) => { if (this.G.nodes[k]) { this.G.nodes[k].note = nd.note; this.G.nodes[k].kind = nd.kind; this.G.nodes[k].w = nd.w; this.G.nodes[k].rank = nd.rank; } }); this.R.maxDeg = Math.max(1, ...this.G.nodes.filter((nd) => !nd.hidden && !nd.anchor).map((nd) => (nd.rank != null ? nd.rank : nd.deg) * (nd.w || 1))); this.G.stats = G.stats;
       this.R.refreshColors(); this.applyHeat(); this.applyOverlay(); this.updateInfo(); this.applyMask();
       return;
     }

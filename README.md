@@ -26,6 +26,7 @@ Works on **desktop and mobile** (touch controls included).
 - **Shortest path** between two notes – pick "Path from here", then the target. Also available as a command.
 - **Fly-to search** – type a name, the camera flies to the note.
 - **Link health check** – notes without links, dead ends and unresolved links are colored, with counts.
+- **Automatic priority** – names and font sizes follow the importance of a note, not just its link count: links across projects and areas count fully, links inside one project (e.g. chapters of a split document) only a little. A `priority` property (1–5 or low/medium/high) and folder weights refine it.
 - **Folder appearance** – right-click a folder: pick its color and weight (normal, important, primary). Primary folders get bigger nodes and names regardless of links.
 - **Colored file explorer** – top-level folders (and optionally their notes) are tinted in the graph colors.
 - **Uses your graph view settings** – color groups and path filters of the core graph view are applied (optional).

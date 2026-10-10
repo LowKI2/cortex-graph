@@ -14,7 +14,7 @@ function hexToRgb(h) {
 function boost(rgb) { const mx = Math.max(rgb[0], rgb[1], rgb[2]) || 1; return rgb.map((c) => Math.min(1, 0.15 + (c / mx) * 0.95)); }
 function mix(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
 const HEAT_RGB = [1, 0.62, 0.22];
-const rk = (nd) => nd.deg * (nd.w || 1); // label/size rank: connections x folder weight
+const rk = (nd) => (nd.rank != null ? nd.rank : nd.deg) * (nd.w || 1); // label rank: importance (or connections) x folder weight
 const PATH_RGB = [1, 0.86, 0.35];
 
 export class GraphRenderer {
@@ -130,7 +130,7 @@ export class GraphRenderer {
   setGraph(nodes, edges, adj) {
     this.nodes = nodes; this.edges = edges; this.adj = adj; this.sel = -1; this.dragK = -1; this.hover = -1;
     this.pathSet = null; this.pathEdges = null;
-    this.maxDeg = Math.max(1, ...nodes.filter((nd) => !nd.hidden && !nd.anchor).map((nd) => nd.deg * (nd.w || 1)));
+    this.maxDeg = Math.max(1, ...nodes.filter((nd) => !nd.hidden && !nd.anchor).map(rk));
     if (this.points) { this.root.remove(this.points); this.points.geometry.dispose(); }
     if (this.lines) { this.root.remove(this.lines); this.lines.geometry.dispose(); }
     const n = nodes.length;

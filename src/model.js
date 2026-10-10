@@ -185,3 +185,49 @@ export function deepestFolderValue(map, path) {
   for (const f in map) if (path.startsWith(f + '/') && f.length > len) { best = map[f]; len = f.length; }
   return best;
 }
+
+/* Automatic importance: PageRank over the links (being linked by important notes counts more than linking out a lot),
+   scaled to the range of link counts so the "from connections" sliders keep their meaning.
+   Optional frontmatter priority/priorität (1-5 or niedrig/mittel/hoch) multiplies the result. */
+const PRIO_WORDS = { niedrig: 1, low: 1, gering: 1, mittel: 3, medium: 3, normal: 3, hoch: 5, high: 5, wichtig: 5 };
+export function prioFactor(fm) {
+  if (!fm) return 1;
+  let v = fm.priority ?? fm.priorität ?? fm.prioritaet ?? fm.prio;
+  if (v == null || v === '') return 1;
+  v = String(v).trim().toLowerCase();
+  const n = PRIO_WORDS[v] ?? Number(v);
+  if (!isFinite(n)) return 1;
+  return Math.pow(2, (Math.max(1, Math.min(5, n)) - 3) / 2); // 1 -> 0.5, 3 -> 1, 5 -> 2
+}
+
+const family = (p) => { const seg = p.split('/'); return seg.length > 2 ? seg[0] + '/' + seg[1] : seg.length === 2 ? seg[0] : p; };
+
+/* Weighted PageRank: links between different projects/areas count fully, links inside the same project
+   (chapters <-> their document) count only 10 % – so big split documents don't outrank the real hubs. */
+export function importance(nodes) {
+  const ks = [], at = new Map();
+  nodes.forEach((nd, k) => { if (nd.note && !nd.hidden && !nd.anchor) { at.set(nd.note.i, ks.length); ks.push(k); } });
+  const n = ks.length; if (!n) return;
+  const fam = ks.map((k) => family(nodes[k].note.path));
+  const out = ks.map((k, a) => [...nodes[k].note.out].map((i) => at.get(i)).filter((b) => b != null).map((b) => [b, fam[b] === fam[a] ? 0.1 : 1]));
+  let pr = new Float64Array(n).fill(1 / n);
+  const d = 0.85;
+  for (let it = 0; it < 50; it++) {
+    const nx = new Float64Array(n).fill((1 - d) / n);
+    let rest = 0;
+    for (let a = 0; a < n; a++) {
+      const L = out[a];
+      if (!L.length) { rest += pr[a]; continue; }
+      let spent = 0;
+      for (const [b, w] of L) { nx[b] += d * pr[a] * w / L.length; spent += w / L.length; }
+      rest += pr[a] * (1 - spent);
+    }
+    const add = d * rest / n;
+    for (let a = 0; a < n; a++) nx[a] += add;
+    pr = nx;
+  }
+  let degSum = 0;
+  for (const k of ks) degSum += nodes[k].deg;
+  const scale = degSum; // pr * n * mean degree
+  ks.forEach((k, a) => { nodes[k].rank = pr[a] * scale * prioFactor(nodes[k].note.fm); });
+}
