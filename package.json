@@ -1,6 +1,6 @@
 {
   "name": "cortex-graph",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "3D graph view with glowing nodes, live updates, activity heat, path finding and mobile support.",
   "main": "main.js",
   "private": true,

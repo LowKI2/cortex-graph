@@ -59,7 +59,7 @@ export class GraphRenderer {
           d /= segLen; vec2 nrm = vec2(-d.y, d.x);
           float px = aSize * uScale / -mvA.z;              // node diameter in device pixels
           float len = min(px * (0.45 + 0.35 * uTaper), segLen * 0.45);
-          float hw = max(0.5, px * 0.075 * uTaper * pow(1.0 - aT, 1.7));
+          float hw = max(0.5, px * 0.06 * uTaper * pow(1.0 - aT, 1.7));   // base width ≈ 1/3 of the visible node at taper 1
           vec2 sP = sA + d * len * aT + nrm * aSide * hw;
           gl_Position = vec4(sP / (0.5 * uRes) * cA.w, cA.z, cA.w);
           vAlpha = alpha * pow(1.0 - aT, 0.8);
