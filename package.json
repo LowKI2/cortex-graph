@@ -1,0 +1,25 @@
+{
+  "name": "cortex-graph",
+  "version": "1.0.0",
+  "description": "3D graph view with glowing nodes, live updates, activity heat, path finding and mobile support.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "lint": "eslint src"
+  },
+  "author": "BZi Studio",
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "0.25.10",
+    "eslint": "^9.39.5",
+    "eslint-plugin-obsidianmd": "^0.4.2",
+    "obsidian": "1.8.7",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.1"
+  },
+  "dependencies": {
+    "three": "0.152.2"
+  }
+}
