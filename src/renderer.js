@@ -41,7 +41,8 @@ export class GraphRenderer {
     this.scene = new Scene();
     this.camera = new PerspectiveCamera(58, 1, 1, 30000);
     this.root = new Group(); this.scene.add(this.root);
-    this.nodeMat = this.glowMaterial(0.75, true);
+    this.nodeMat = this.glowMaterial(0.75, true);      // light + glow, additive, drawn on top
+    this.baseMat = this.nodeBaseMaterial();            // solid body underneath: hides lines behind the node
     this.starMat = this.glowMaterial(0.35, false);
     this.lineMat = new ShaderMaterial({
       vertexShader: `attribute float alpha; attribute vec3 color; varying vec3 vColor; varying float vAlpha;
@@ -63,6 +64,37 @@ export class GraphRenderer {
     this.bindInput();
     this.t0 = performance.now(); this.clockT = this.t0;
     this.raf = window.requestAnimationFrame(() => this.frame());
+  }
+
+  nodeBaseMaterial() {
+    return new ShaderMaterial({
+      uniforms: { uScale: { value: 300 }, uMin: { value: 0.5 }, uBright: { value: 1.0 } },
+      vertexShader: `
+        attribute float size; attribute float alpha; attribute vec3 color; attribute float shape;
+        varying vec3 vColor; varying float vAlpha; varying float vShape;
+        uniform float uScale; uniform float uMin;
+        void main() {
+          vColor = color; vAlpha = alpha; vShape = shape;
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = clamp(max(size * uScale / -mv.z, size * uMin), 2.0, 240.0);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: `
+        varying vec3 vColor; varying float vAlpha; varying float vShape;
+        uniform float uBright;
+        void main() {
+          vec2 c = gl_PointCoord - 0.5;
+          float d = length(c) * 2.0;
+          float dc = d;
+          if (vShape > 3.5) dc = max(abs(c.x), abs(c.y)) * 2.6;
+          else if (vShape > 2.5) dc = (abs(c.x) + abs(c.y)) * 2.2;
+          else if (vShape > 1.5) { float an = atan(c.y, c.x); dc = d / (0.45 + 0.55 * pow(abs(cos(2.5 * an)), 4.0)) * 0.75; }
+          float fill = vShape > 0.5 && vShape < 1.5 ? 1.0 - smoothstep(0.06, 0.1, abs(d - 0.3)) : 1.0 - smoothstep(0.26, 0.32, dc);
+          if (fill <= 0.01) discard;
+          gl_FragColor = vec4(vColor * 0.55 * min(1.5, uBright), fill * vAlpha);
+        }`,
+      transparent: true, depthWrite: false, blending: NormalBlending,
+    });
   }
 
   glowMaterial(coreAmt, fog) {
@@ -152,6 +184,7 @@ export class GraphRenderer {
     this.pathSet = null; this.pathEdges = null;
     this.maxDeg = Math.max(1, ...nodes.filter((nd) => !nd.hidden && !nd.anchor).map(rk));
     if (this.points) { this.root.remove(this.points); this.points.geometry.dispose(); }
+    if (this.basePoints) { this.root.remove(this.basePoints); this.basePoints = null; }
     if (this.lines) { this.root.remove(this.lines); this.lines.geometry.dispose(); }
     const n = nodes.length;
     const pos = new Float32Array(n * 3);
@@ -163,6 +196,7 @@ export class GraphRenderer {
     g.setAttribute('alpha', new BufferAttribute(new Float32Array(n), 1));
     g.setAttribute('heat', new BufferAttribute(new Float32Array(n), 1));
     g.setAttribute('shape', new BufferAttribute(new Float32Array(n), 1));
+    this.basePoints = new Points(g, this.baseMat); this.basePoints.frustumCulled = false; this.basePoints.renderOrder = 9; this.root.add(this.basePoints);
     this.points = new Points(g, this.nodeMat); this.points.frustumCulled = false; this.points.renderOrder = 10; this.root.add(this.points);
     const m = edges.length;
     const lg = new BufferGeometry();
@@ -423,6 +457,7 @@ export class GraphRenderer {
     u.uRad.value = Math.max(0.4, st.glow != null ? st.glow : 1);   // Leuchten = radius of the glow, not its strength
     u.uSizeK.value = 1 / Math.sqrt(Math.max(1, st.nodeSize));
     u.uBright.value = st.nodeBright != null ? st.nodeBright : 1;  // Helligkeit = intensity
+    this.baseMat.uniforms.uBright.value = u.uBright.value;
     this.refreshColors(); this.updateLabels(true);
   }
 
@@ -485,6 +520,7 @@ export class GraphRenderer {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
     this.nodeMat.uniforms.uScale.value = h * this.renderer.getPixelRatio() * 0.55;
+    this.baseMat.uniforms.uScale.value = h * this.renderer.getPixelRatio() * 0.55;
     this.starMat.uniforms.uScale.value = h * this.renderer.getPixelRatio() * 0.55;
     if (!this.userMoved) this.fit(true);
   }
@@ -776,7 +812,7 @@ export class GraphRenderer {
     (this.unbind || []).forEach((f) => f());
     if (!this.active) return;
     for (const o of [this.points, this.lines, this.stars]) if (o) o.geometry.dispose();
-    for (const m of [this.nodeMat, this.lineMat, this.starMat]) m.dispose();
+    for (const m of [this.nodeMat, this.baseMat, this.lineMat, this.starMat]) m.dispose();
     if (this.galaxyMat) { this.galaxyMat.map.dispose(); this.galaxyMat.dispose(); }
     if (this.sugLines) this.sugLines.geometry.dispose();
     if (this.sugMat) this.sugMat.dispose();
