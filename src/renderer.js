@@ -2,7 +2,7 @@
 import {
   WebGLRenderer, Scene, FogExp2, PerspectiveCamera, Group, BufferGeometry, BufferAttribute, Points, LineSegments,
   ShaderMaterial, LineDashedMaterial, AdditiveBlending, NormalBlending, Vector2, Vector3, Raycaster, Plane, Color,
-  Sprite, SpriteMaterial, CanvasTexture, Mesh, DoubleSide,
+  Sprite, SpriteMaterial, CanvasTexture,
 } from 'three';
 
 export const LABEL_FONTS = {
@@ -14,7 +14,7 @@ export const LABEL_FONTS = {
   round: "ui-rounded, 'SF Pro Rounded', 'Segoe UI Variable Display', 'Nunito', sans-serif",
 };
 const cssVarFont = (v) => { try { return getComputedStyle(document.body).getPropertyValue(v).trim() || 'system-ui, sans-serif'; } catch { return 'system-ui, sans-serif'; } };
-const STYLE_DEFAULT = { nodeSize: 1, degSize: 1, glow: 1, line: 1, taper: 0.4, taperLen: 0.6, lineGlow: 0.25, nodeBright: 1, nodeOpacity: 1, font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, rotate: true };
+const STYLE_DEFAULT = { nodeSize: 1, degSize: 1, glow: 1, line: 1, nodeBright: 1, font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, rotate: true };
 
 function hexToRgb(h) {
   const v = parseInt(String(h).replace('#', '').slice(0, 6), 16) || 0;
@@ -41,8 +41,7 @@ export class GraphRenderer {
     this.scene = new Scene();
     this.camera = new PerspectiveCamera(58, 1, 1, 30000);
     this.root = new Group(); this.scene.add(this.root);
-    this.nodeMat = this.nodeBaseMaterial();
-    this.nodeGlowMat = this.nodeGlowMaterial();
+    this.nodeMat = this.glowMaterial(0.75, true);
     this.starMat = this.glowMaterial(0.35, false);
     this.lineMat = new ShaderMaterial({
       vertexShader: `attribute float alpha; attribute vec3 color; varying vec3 vColor; varying float vAlpha;
@@ -50,10 +49,6 @@ export class GraphRenderer {
       fragmentShader: 'varying vec3 vColor; varying float vAlpha; void main() { gl_FragColor = vec4(vColor, vAlpha); }',
       transparent: true, depthWrite: false, blending: AdditiveBlending,
     });
-    /* edges as screen-space ribbons: a solid line (Linienstärke) that widens into a wedge at the nodes,
-       plus a separate additive glow pass on top (Leuchten der Linien) */
-    this.edgeBaseMat = this.edgeMaterial(false);
-    this.edgeGlowMat = this.edgeMaterial(true);
     this.makeStars();
     this.nodes = []; this.edges = []; this.adj = []; this.points = null; this.lines = null;
     this.sel = -1; this.dragK = -1; this.hover = -1;
@@ -70,134 +65,29 @@ export class GraphRenderer {
     this.raf = window.requestAnimationFrame(() => this.frame());
   }
 
-  edgeMaterial(glow) {
-    return new ShaderMaterial({
-      uniforms: { uScale: { value: 300 }, uRes: { value: new Vector2(800, 600) }, uLineW: { value: 1 }, uTaper: { value: 1 }, uLen: { value: 1 },
-        uGlowW: { value: 6 }, uGlow: { value: 0.6 }, uOpacity: { value: 1 } },
-      vertexShader: `
-        attribute vec3 aB; attribute float aU; attribute float aEnd; attribute float aSide; attribute float aSizeA; attribute float aSizeB;
-        attribute vec3 color; attribute float alpha;
-        uniform float uScale; uniform vec2 uRes; uniform float uLineW; uniform float uTaper; uniform float uLen; uniform float uGlowW;
-        varying vec3 vColor; varying float vAlpha; varying float vAcross;
-        const float GLOW = ${glow ? '1.0' : '0.0'};
-        void main() {
-          vColor = color; vAlpha = alpha; vAcross = aSide;
-          vec4 mA = modelViewMatrix * vec4(position, 1.0), mB = modelViewMatrix * vec4(aB, 1.0);
-          // keep both ends in front of the camera
-          if (mA.z > -1.0 && mB.z > -1.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vAlpha = 0.0; return; }
-          if (mA.z > -1.0) mA = mix(mB, mA, (-1.0 - mB.z) / (mA.z - mB.z));
-          if (mB.z > -1.0) mB = mix(mA, mB, (-1.0 - mA.z) / (mB.z - mA.z));
-          vec4 cA = projectionMatrix * mA, cB = projectionMatrix * mB;
-          vec2 sA = cA.xy / cA.w * 0.5 * uRes, sB = cB.xy / cB.w * 0.5 * uRes;
-          vec2 d = sB - sA; float segLen = length(d);
-          if (segLen < 0.5) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vAlpha = 0.0; return; }
-          d /= segLen; vec2 nrm = vec2(-d.y, d.x);
-          float pxA = aSizeA * uScale / -mA.z, pxB = aSizeB * uScale / -mB.z;
-          float zA = clamp(-mA.z / 700.0, 0.2, 1.0), zB = clamp(-mB.z / 700.0, 0.2, 1.0);
-          float along, taper = 0.0;
-          if (aEnd < 0.25) {
-            float L = min(pxA * 0.8 * uLen * zA, segLen * 0.48);
-            along = aU * L; taper = pxA * 0.06 * uTaper * zA * pow(1.0 - aU, 1.7);
-          } else if (aEnd > 0.75) {
-            float L = min(pxB * 0.8 * uLen * zB, segLen * 0.48);
-            along = segLen - aU * L; taper = pxB * 0.06 * uTaper * zB * pow(1.0 - aU, 1.7);
-          } else along = segLen * 0.5;
-          float hw = max(0.5, 0.5 * uLineW + taper);
-          vAlpha *= clamp((0.5 * uLineW + taper) / 0.5, 0.25, 1.0);   // hairlines fade instead of getting wider
-          if (GLOW > 0.5) hw = hw * 1.6 + uGlowW;
-          vec2 sP = sA + d * along + nrm * aSide * hw;
-          vec4 cP = mix(cA, cB, along / segLen);
-          gl_Position = vec4(sP / (0.5 * uRes) * cP.w, cP.z, cP.w);
-        }`,
-      fragmentShader: glow
-        ? 'varying vec3 vColor; varying float vAlpha; varying float vAcross; uniform float uGlow; void main() { float g = pow(1.0 - abs(vAcross), 2.0); gl_FragColor = vec4(vColor * g * uGlow, vAlpha); }'
-        : 'varying vec3 vColor; varying float vAlpha; varying float vAcross; uniform float uOpacity; void main() { float a = 1.0 - smoothstep(0.55, 1.0, abs(vAcross)); gl_FragColor = vec4(vColor, a * vAlpha * uOpacity); }',
-      transparent: true, depthWrite: false, blending: glow ? AdditiveBlending : NormalBlending, side: DoubleSide,
-    });
-  }
-
-  /* shared vertex shader for nodes (base + glow use the same geometry) */
-  static nodeVertex() {
-    return `
-        attribute float size; attribute float alpha; attribute vec3 color; attribute float heat; attribute float shape;
-        varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape;
-        uniform float uScale;
-        void main() {
-          vColor = color; vAlpha = alpha; vHeat = heat; vShape = shape;
-          vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          float ps = size * uScale / -mv.z;
-          gl_PointSize = clamp(max(ps, size * 0.5), 2.0, 240.0);
-          gl_Position = projectionMatrix * mv;
-        }`;
-  }
-
-  /* the node itself: a solid shape in its own color (circle, ring, star, diamond, square) */
-  nodeBaseMaterial() {
-    return new ShaderMaterial({
-      uniforms: { uScale: { value: 300 }, uBright: { value: 1.0 }, uOpacity: { value: 1.0 } },
-      vertexShader: GraphRenderer.nodeVertex(),
-      fragmentShader: `
-        varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape;
-        uniform float uBright; uniform float uOpacity;
-        void main() {
-          vec2 c = gl_PointCoord - 0.5;
-          float d = length(c) * 2.0;
-          float dc = d;
-          if (vShape > 3.5) dc = max(abs(c.x), abs(c.y)) * 2.0 * 1.12;
-          else if (vShape > 2.5) dc = (abs(c.x) + abs(c.y)) * 2.0 * 0.86;
-          else if (vShape > 1.5) { float an = atan(c.y, c.x); dc = d / (0.5 + 0.5 * pow(abs(cos(2.5 * an)), 3.0)) * 0.62; }
-          float R0 = 0.42, aa = 0.035;
-          float fill = vShape > 0.5 && vShape < 1.5
-            ? 1.0 - smoothstep(0.075 - aa, 0.075, abs(d - 0.34))
-            : 1.0 - smoothstep(R0 - aa, R0, dc);
-          if (fill <= 0.0) discard;
-          float shade = 0.82 + 0.3 * (1.0 - clamp(dc / R0, 0.0, 1.0));   // slight depth, keeps the color saturated
-          gl_FragColor = vec4(vColor * uBright * shade, fill * vAlpha * uOpacity);
-        }`,
-      transparent: true, depthWrite: false, blending: NormalBlending,
-    });
-  }
-
-  /* glow drawn underneath the node, additive; strength = Leuchtstärke */
-  nodeGlowMaterial() {
-    return new ShaderMaterial({
-      uniforms: { uScale: { value: 300 }, uGlow: { value: 1.0 }, uSizeK: { value: 1.0 }, uTime: { value: 0 } },
-      vertexShader: GraphRenderer.nodeVertex(),
-      fragmentShader: `
-        varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape;
-        uniform float uGlow; uniform float uSizeK; uniform float uTime;
-        void main() {
-          float d = length(gl_PointCoord - 0.5) * 2.0;
-          if (d > 1.0) discard;
-          float pulse = 1.0 + vHeat * 0.8 * (0.5 + 0.5 * sin(uTime * 2.6));
-          float halo = pow(1.0 - d, 2.2) * pulse;
-          gl_FragColor = vec4(vColor * halo * 2.25 * uGlow * uSizeK, vAlpha);
-        }`,
-      transparent: true, depthWrite: false, blending: AdditiveBlending,
-    });
-  }
-
   glowMaterial(coreAmt, fog) {
     return new ShaderMaterial({
-      uniforms: { uScale: { value: 300 }, uCore: { value: coreAmt }, uMin: { value: fog ? 0.5 : 0.0 }, uGlow: { value: 1.0 }, uSizeK: { value: 1.0 }, uBright: { value: 1.0 }, uOpacity: { value: -1.0 }, uTime: { value: 0 }, uLight: { value: 0 } },
+      uniforms: { uScale: { value: 300 }, uCore: { value: coreAmt }, uMin: { value: fog ? 0.5 : 0.0 }, uGlow: { value: 1.0 }, uRad: { value: 1.0 }, uSizeK: { value: 1.0 }, uBright: { value: 1.0 }, uTime: { value: 0 }, uLight: { value: 0 } },
       vertexShader: `
         attribute float size; attribute float alpha; attribute vec3 color; attribute float heat; attribute float shape;
         varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape;
-        uniform float uScale; uniform float uMin;
+        uniform float uScale; uniform float uMin; uniform float uRad;
         void main() {
           vColor = color; vAlpha = alpha; vHeat = heat; vShape = shape;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
           float ps = size * uScale / -mv.z;
-          gl_PointSize = clamp(max(ps, size * uMin), 2.0, 240.0);
+          gl_PointSize = clamp(max(ps, size * uMin) * uRad, 2.0, 400.0);
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: `
         varying vec3 vColor; varying float vAlpha; varying float vHeat; varying float vShape;
-        uniform float uCore; uniform float uGlow; uniform float uSizeK; uniform float uBright; uniform float uOpacity; uniform float uTime; uniform float uLight;
+        uniform float uCore; uniform float uGlow; uniform float uRad; uniform float uSizeK; uniform float uBright; uniform float uTime; uniform float uLight;
         void main() {
-          vec2 c = gl_PointCoord - 0.5;
+          vec2 cs = gl_PointCoord - 0.5;
+          float dh = length(cs) * 2.0;           // 0..1 across the whole sprite (glow)
+          if (dh > 1.0) discard;
+          vec2 c = cs * uRad;                    // the node itself keeps its size when the glow radius changes
           float d = length(c) * 2.0;
-          if (d > 1.0) discard;
           float pulse = 1.0 + vHeat * 0.55 * (0.5 + 0.5 * sin(uTime * 2.6));
           // node shapes: 0 circle, 1 ring, 2 star, 3 diamond, 4 square
           float dc = d;
@@ -205,20 +95,18 @@ export class GraphRenderer {
           else if (vShape > 2.5) dc = (abs(c.x) + abs(c.y)) * 2.2;
           else if (vShape > 1.5) { float an = atan(c.y, c.x); dc = d / (0.45 + 0.55 * pow(abs(cos(2.5 * an)), 4.0)) * 0.75; }
           float core = vShape > 0.5 && vShape < 1.5 ? smoothstep(0.1, 0.0, abs(d - 0.3)) : smoothstep(0.32, 0.0, dc);
-          float halo = pow(1.0 - d, 2.6) * pulse;
+          float halo = pow(1.0 - dh, 2.6) * pulse;
           if (uLight > 0.5) {
             float disc = vShape > 0.5 && vShape < 1.5 ? smoothstep(0.14, 0.06, abs(d - 0.45)) : smoothstep(0.62, 0.5, vShape > 0.5 ? dc * 1.6 : d);
             float a = max(disc, halo * 0.45 * uGlow);
-            gl_FragColor = vec4(vColor * (0.75 + 0.25 * core) * min(1.0, uBright + 0.25), a * vAlpha * (uOpacity < 0.0 ? 1.0 : 0.25 + 0.75 * uOpacity));
+            gl_FragColor = vec4(vColor * (0.75 + 0.25 * core) * min(1.0, uBright + 0.25), a * vAlpha);
             return;
           }
           // bigger nodes overlap more under additive blending – keep their brightness constant
           float hk = uGlow * uSizeK;
           vec3 col = vColor * (halo * 0.95 * hk + core * 1.1) + vec3(1.0) * core * uCore;
           float a = clamp(halo * 0.9 * hk + core, 0.0, 1.0) * vAlpha;
-          if (uOpacity < 0.0) { gl_FragColor = vec4(col * uBright, a); return; }
-          // premultiplied: the glow adds light, the core covers what lies behind it (opacity slider)
-          gl_FragColor = vec4(col * uBright * a, clamp(core * 1.4, 0.0, 1.0) * vAlpha * uOpacity);
+          gl_FragColor = vec4(col * uBright, a);   // additive: the glow lies on top of the node
         }`,
       transparent: true, depthWrite: false, blending: AdditiveBlending,
     });
@@ -253,9 +141,8 @@ export class GraphRenderer {
     this.scene.fog = new FogExp2(new Color(bg).getHex(), space ? 0.0009 : 0.0004);
     this.stars.visible = space;
     const blend = this.light ? NormalBlending : AdditiveBlending;
-    this.lineMat.blending = blend;
-    if (this.glowPoints) this.glowPoints.visible = !this.light;
-    if (this.edgeGlow) this.edgeGlow.visible = !this.light && (this.style.lineGlow == null ? 0.6 : this.style.lineGlow) > 0;
+    this.nodeMat.blending = blend; this.lineMat.blending = blend;
+    this.nodeMat.uniforms.uLight.value = this.light ? 1 : 0;
     this.nodeMat.needsUpdate = true; this.lineMat.needsUpdate = true;
     if (this.points) this.paint();
   }
@@ -265,9 +152,7 @@ export class GraphRenderer {
     this.pathSet = null; this.pathEdges = null;
     this.maxDeg = Math.max(1, ...nodes.filter((nd) => !nd.hidden && !nd.anchor).map(rk));
     if (this.points) { this.root.remove(this.points); this.points.geometry.dispose(); }
-    if (this.glowPoints) { this.root.remove(this.glowPoints); this.glowPoints = null; }
     if (this.lines) { this.root.remove(this.lines); this.lines.geometry.dispose(); }
-    if (this.edgeBase) { this.root.remove(this.edgeBase); this.root.remove(this.edgeGlow); this.edgeBase.geometry.dispose(); this.edgeBase = this.edgeGlow = null; }
     const n = nodes.length;
     const pos = new Float32Array(n * 3);
     for (let k = 0; k < n; k++) { const nd = nodes[k]; pos[3 * k] = nd.x || 0; pos[3 * k + 1] = nd.y || 0; pos[3 * k + 2] = nd.z || 0; }
@@ -278,15 +163,13 @@ export class GraphRenderer {
     g.setAttribute('alpha', new BufferAttribute(new Float32Array(n), 1));
     g.setAttribute('heat', new BufferAttribute(new Float32Array(n), 1));
     g.setAttribute('shape', new BufferAttribute(new Float32Array(n), 1));
-    this.glowPoints = new Points(g, this.nodeGlowMat); this.glowPoints.frustumCulled = false; this.glowPoints.renderOrder = 5; this.glowPoints.visible = !this.light; this.root.add(this.glowPoints);
     this.points = new Points(g, this.nodeMat); this.points.frustumCulled = false; this.points.renderOrder = 10; this.root.add(this.points);
     const m = edges.length;
     const lg = new BufferGeometry();
     lg.setAttribute('position', new BufferAttribute(new Float32Array(m * 6), 3));
     lg.setAttribute('color', new BufferAttribute(new Float32Array(m * 6), 3));
     lg.setAttribute('alpha', new BufferAttribute(new Float32Array(m * 2), 1));
-    this.lines = new LineSegments(lg, this.lineMat); this.lines.frustumCulled = false; this.lines.visible = false; this.root.add(this.lines); // data store; drawn as edge meshes
-    this.buildEdges(m);
+    this.lines = new LineSegments(lg, this.lineMat); this.lines.frustumCulled = false; this.root.add(this.lines);
     this.heat = new Float32Array(n);
     this.flashes = new Map();
     this.applyShapes();
@@ -454,71 +337,6 @@ export class GraphRenderer {
     this.paint(); this.updateLabels(true);
   }
 
-  buildEdges(m) {
-    // samples along one edge: 5 from end A (u = 0..1 of the wedge), the middle, 5 from end B
-    const U = [0, 0.15, 0.35, 0.6, 1], NS = 2 * U.length + 1, V = 2 * NS, nv = m * V;
-    const g = new BufferGeometry();
-    const u = new Float32Array(nv), end = new Float32Array(nv), side = new Float32Array(nv);
-    for (let e = 0; e < m; e++) for (let i = 0; i < NS; i++) for (let j = 0; j < 2; j++) {
-      const v = e * V + 2 * i + j;
-      if (i < U.length) { u[v] = U[i]; end[v] = 0; } else if (i === U.length) { u[v] = 1; end[v] = 0.5; } else { u[v] = U[NS - 1 - i]; end[v] = 1; }
-      side[v] = j ? 1 : -1;
-    }
-    const idx = new Uint32Array(m * (NS - 1) * 6);
-    let q = 0;
-    for (let e = 0; e < m; e++) for (let i = 0; i < NS - 1; i++) {
-      const v = e * V + 2 * i;
-      idx[q++] = v; idx[q++] = v + 1; idx[q++] = v + 2; idx[q++] = v + 1; idx[q++] = v + 3; idx[q++] = v + 2;
-    }
-    g.setIndex(new BufferAttribute(idx, 1));
-    g.setAttribute('position', new BufferAttribute(new Float32Array(nv * 3), 3));
-    g.setAttribute('aB', new BufferAttribute(new Float32Array(nv * 3), 3));
-    g.setAttribute('aU', new BufferAttribute(u, 1));
-    g.setAttribute('aEnd', new BufferAttribute(end, 1));
-    g.setAttribute('aSide', new BufferAttribute(side, 1));
-    g.setAttribute('aSizeA', new BufferAttribute(new Float32Array(nv), 1));
-    g.setAttribute('aSizeB', new BufferAttribute(new Float32Array(nv), 1));
-    g.setAttribute('color', new BufferAttribute(new Float32Array(nv * 3), 3));
-    g.setAttribute('alpha', new BufferAttribute(new Float32Array(nv), 1));
-    this.edgeV = V; this.edgeNS = NS;
-    this.edgeBase = new Mesh(g, this.edgeBaseMat); this.edgeBase.frustumCulled = false; this.edgeBase.renderOrder = 1;
-    this.edgeGlow = new Mesh(g, this.edgeGlowMat); this.edgeGlow.frustumCulled = false; this.edgeGlow.renderOrder = 2;
-    this.edgeGlow.visible = !this.light && (this.style.lineGlow == null ? 0.6 : this.style.lineGlow) > 0;
-    this.root.add(this.edgeBase); this.root.add(this.edgeGlow);
-  }
-
-  syncEdges() {
-    if (!this.edgeBase) return;
-    const ga = this.edgeBase.geometry.attributes, P = ga.position.array, B = ga.aB.array, nodes = this.nodes, V = this.edgeV;
-    for (let k = 0; k < this.edges.length; k++) {
-      const a = nodes[this.edges[k][0]], b = nodes[this.edges[k][1]];
-      const ax = a.x, ay = a.y, az = a.z || 0, bx = b.x, by = b.y, bz = b.z || 0;
-      for (let v = k * V, o = 3 * v; v < (k + 1) * V; v++, o += 3) { P[o] = ax; P[o + 1] = ay; P[o + 2] = az; B[o] = bx; B[o + 1] = by; B[o + 2] = bz; }
-    }
-    ga.position.needsUpdate = true; ga.aB.needsUpdate = true;
-  }
-
-  paintEdges() {
-    if (!this.edgeBase) return;
-    const ga = this.edgeBase.geometry.attributes, C = ga.color.array, A = ga.alpha.array, SA = ga.aSizeA.array, SB = ga.aSizeB.array;
-    const la = this.lines.geometry.attributes, lc = la.color.array, lA = la.alpha.array, sz = this.points.geometry.attributes.size.array;
-    const V = this.edgeV, NS = this.edgeNS, half = (NS - 1) / 2;
-    for (let k = 0; k < this.edges.length; k++) {
-      const [a, b] = this.edges[k];
-      const sa = this.nodes[a].anchor ? 0 : sz[a], sb = this.nodes[b].anchor ? 0 : sz[b];
-      const al = Math.min(1, lA[2 * k] * 1.5);
-      for (let i = 0; i < NS; i++) {
-        const t = i < half ? 0 : i > half ? 1 : 0.5;
-        const r = lc[6 * k] * (1 - t) + lc[6 * k + 3] * t, g = lc[6 * k + 1] * (1 - t) + lc[6 * k + 4] * t, bl = lc[6 * k + 2] * (1 - t) + lc[6 * k + 5] * t;
-        for (let j = 0; j < 2; j++) {
-          const v = k * V + 2 * i + j;
-          C[3 * v] = r; C[3 * v + 1] = g; C[3 * v + 2] = bl; A[v] = al; SA[v] = sa; SB[v] = sb;
-        }
-      }
-    }
-    ga.color.needsUpdate = true; ga.alpha.needsUpdate = true; ga.aSizeA.needsUpdate = true; ga.aSizeB.needsUpdate = true;
-  }
-
   syncLines() {
     if (!this.lines) return;
     const lp = this.lines.geometry.attributes.position.array, nodes = this.nodes;
@@ -528,7 +346,6 @@ export class GraphRenderer {
       lp[6 * k + 3] = b.x; lp[6 * k + 4] = b.y; lp[6 * k + 5] = b.z || 0;
     }
     this.lines.geometry.attributes.position.needsUpdate = true;
-    this.syncEdges();
     if (this.sugLines && (this.sugTick = (this.sugTick || 0) + 1) % 3 === 0) this.syncSuggest();
   }
 
@@ -570,7 +387,7 @@ export class GraphRenderer {
     }
     ga.alpha.needsUpdate = true; ga.size.needsUpdate = true; ga.color.needsUpdate = true;
     const la = this.lines.geometry.attributes;
-    const lc = la.color.array, lA = la.alpha.array;
+    const lc = la.color.array, lA = la.alpha.array, w = this.style.line;
     const base = this.light ? 0.35 : 0.22;
     for (let k = 0; k < this.edges.length; k++) {
       const [a, b] = this.edges[k];
@@ -591,10 +408,9 @@ export class GraphRenderer {
         alpha = this.anchorLines && !this.isOff(other) && !(na.anchor && nb2.anchor && !this.anchorLines) ? (this.hl ? (this.hl.has(other) ? 0.18 : 0.01) : 0.07) : 0;
         if (na.anchor && nb2.anchor) alpha = this.anchorLines && !this.hl ? 0.05 : 0;
       } else if (this.isOff(a) || this.isOff(b)) alpha = 0;
-      lA[2 * k] = lA[2 * k + 1] = Math.min(1, alpha);
+      lA[2 * k] = lA[2 * k + 1] = Math.min(1, alpha * w);
     }
     la.color.needsUpdate = true; la.alpha.needsUpdate = true;
-    this.paintEdges();
   }
 
   setStyle(upd) {
@@ -603,20 +419,10 @@ export class GraphRenderer {
     this.fontStack = LABEL_FONTS[lf] || cssVarFont(lf === 'text' ? '--font-text' : '--font-interface');
     this.labelLayer.setCssProps({ '--cg-lf': this.fontStack });
     for (const c of ['glow', 'shadow', 'pill', 'none']) this.labelLayer.toggleClass('cg-ls-' + c, (this.style.labelStyle || 'glow') === c);
-    const st = this.style;
-    this.nodeGlowMat.uniforms.uGlow.value = st.glow;
-    this.nodeGlowMat.uniforms.uSizeK.value = 1 / Math.sqrt(Math.max(1, st.nodeSize));
-    this.nodeMat.uniforms.uBright.value = st.nodeBright != null ? st.nodeBright : 1;
-    this.nodeMat.uniforms.uOpacity.value = st.nodeOpacity != null ? st.nodeOpacity : 1;
-    for (const m of [this.edgeBaseMat, this.edgeGlowMat]) {
-      m.uniforms.uLineW.value = (st.line != null ? st.line : 1) * 0.6 * this.renderer.getPixelRatio();
-      m.uniforms.uTaper.value = st.taper || 0;
-      m.uniforms.uLen.value = st.taperLen != null ? st.taperLen : 1;
-    }
-    const lg = st.lineGlow != null ? st.lineGlow : 0.6;
-    this.edgeGlowMat.uniforms.uGlow.value = lg;
-    this.edgeGlowMat.uniforms.uGlowW.value = 5 * this.renderer.getPixelRatio();
-    if (this.edgeGlow) this.edgeGlow.visible = !this.light && lg > 0;
+    const st = this.style, u = this.nodeMat.uniforms;
+    u.uRad.value = Math.max(0.4, st.glow != null ? st.glow : 1);   // Leuchten = radius of the glow, not its strength
+    u.uSizeK.value = 1 / Math.sqrt(Math.max(1, st.nodeSize));
+    u.uBright.value = st.nodeBright != null ? st.nodeBright : 1;  // Helligkeit = intensity
     this.refreshColors(); this.updateLabels(true);
   }
 
@@ -680,11 +486,6 @@ export class GraphRenderer {
     this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
     this.nodeMat.uniforms.uScale.value = h * this.renderer.getPixelRatio() * 0.55;
     this.starMat.uniforms.uScale.value = h * this.renderer.getPixelRatio() * 0.55;
-    this.nodeGlowMat.uniforms.uScale.value = h * this.renderer.getPixelRatio() * 0.55;
-    for (const m of [this.edgeBaseMat, this.edgeGlowMat]) {
-      m.uniforms.uScale.value = h * this.renderer.getPixelRatio() * 0.55;
-      m.uniforms.uRes.value.set(w * this.renderer.getPixelRatio(), h * this.renderer.getPixelRatio());
-    }
     if (!this.userMoved) this.fit(true);
   }
 
@@ -905,7 +706,7 @@ export class GraphRenderer {
     const c = this.camera, t = this.target;
     c.position.set(t.x + this.dist * Math.cos(this.pitch) * Math.sin(this.yaw), t.y + this.dist * Math.sin(this.pitch), t.z + this.dist * Math.cos(this.pitch) * Math.cos(this.yaw));
     c.lookAt(t);
-    this.nodeGlowMat.uniforms.uTime.value = (now - this.t0) / 1000;
+    this.nodeMat.uniforms.uTime.value = (now - this.t0) / 1000;
     this.stars.rotation.y += dt * 0.004;
     this.updateFlashes();
     this.updateGalaxy(dt);
@@ -974,8 +775,8 @@ export class GraphRenderer {
     window.cancelAnimationFrame(this.raf);
     (this.unbind || []).forEach((f) => f());
     if (!this.active) return;
-    for (const o of [this.points, this.lines, this.stars, this.edgeBase]) if (o) o.geometry.dispose();
-    for (const m of [this.nodeMat, this.nodeGlowMat, this.lineMat, this.starMat, this.edgeBaseMat, this.edgeGlowMat]) m.dispose();
+    for (const o of [this.points, this.lines, this.stars]) if (o) o.geometry.dispose();
+    for (const m of [this.nodeMat, this.lineMat, this.starMat]) m.dispose();
     if (this.galaxyMat) { this.galaxyMat.map.dispose(); this.galaxyMat.dispose(); }
     if (this.sugLines) this.sugLines.geometry.dispose();
     if (this.sugMat) this.sugMat.dispose();
