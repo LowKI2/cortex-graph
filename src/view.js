@@ -327,7 +327,7 @@ export class CortexGraphView extends ItemView {
     this.sheetTitle.setText(this.G.nodes[k].label);
     this.sheetMeta.setText(t('pathPick'));
     this.sheetBtns.toggle(false); this.sheetPathBtns.toggle(true);
-    this.sheet.toggle(true);
+    this.sheet.toggle(true); this.syncSheetSpace();
   }
 
   finishPath(k) {
@@ -340,7 +340,7 @@ export class CortexGraphView extends ItemView {
     this.sheetTitle.setText(this.G.nodes[this.pathFrom].label + ' → ' + this.G.nodes[k].label);
     this.sheetMeta.setText(t('pathFound', p.length - 1) + ': ' + p.map((j) => this.G.nodes[j].label).join(' › '));
     this.sheetBtns.toggle(false); this.sheetPathBtns.toggle(true);
-    this.sheet.toggle(true);
+    this.sheet.toggle(true); this.syncSheetSpace();
   }
 
   /* path from the command palette (paths of notes) */
@@ -438,11 +438,11 @@ export class CortexGraphView extends ItemView {
       const b = parent.createEl('button', { cls: 'cg-nb' + (cls ? ' ' + cls : ''), attr: { 'aria-label': label, 'data-a': a } });
       setIcon(b, icon); return b;
     };
-    btn(nav, 'zin', 'plus', t('zoomIn')); btn(nav, 'zout', 'minus', t('zoomOut'));
     const pad = nav.createDiv({ cls: 'cg-pad' });
     pad.createSpan(); btn(pad, 'up', 'chevron-up', t('up')); pad.createSpan();
     btn(pad, 'left', 'chevron-left', t('left')); btn(pad, 'fit', 'maximize', t('fit'), 'cg-fit'); btn(pad, 'right', 'chevron-right', t('right'));
     btn(pad, 'rl', 'rotate-ccw', t('rotL')); btn(pad, 'down', 'chevron-down', t('down')); btn(pad, 'rr', 'rotate-cw', t('rotR'));
+    btn(pad, 'zout', 'minus', t('zoomOut')); pad.createSpan(); btn(pad, 'zin', 'plus', t('zoomIn'));
     btn(nav, 'hide', 'move', t('navToggle'), 'cg-navtoggle');
     let holdA = null, holdBtn = null, raf = 0, last = 0;
     const loop = (ts) => { if (!holdA) return; const k = Math.min(4, (ts - last) / 16.7); last = ts; this.navStep(holdA, k); raf = window.requestAnimationFrame(loop); };
@@ -499,8 +499,13 @@ export class CortexGraphView extends ItemView {
     } else { this.sheetMeta.setText(t('unresolved')); this.sheetBtns.toggle(false); }
     this.sheetPathBtns.toggle(false);
     this.sheet.toggle(true);
+    this.syncSheetSpace();
   }
-  hideSheet() { if (this.sheet) this.sheet.toggle(false); }
+  hideSheet() { if (this.sheet) { this.sheet.toggle(false); this.syncSheetSpace(); } }
+  syncSheetSpace() {
+    const h = this.sheet && this.sheet.isShown() ? this.sheet.offsetHeight + 8 : 0;
+    this.rootEl.setCssProps({ '--cg-sheet-h': h + 'px' });
+  }
 
   buildPanel(root) {
     const p = root.createDiv({ cls: 'cg-panel' }); p.toggle(false);
