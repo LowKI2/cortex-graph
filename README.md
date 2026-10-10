@@ -15,7 +15,11 @@ Works on **desktop and mobile** (touch controls included).
   - right-click shows the normal file menu
 - **Local graph** that follows the active note (depth 1–3), also in the sidebar.
 - **Explorer hover** – hovering a file in the file explorer lights up its node, hovering a folder lights up all notes inside.
-- **Time lapse and tag filter** – watch your vault grow by creation date, modification date or any date property; limit the time range, filter by tag, choose the playback duration.
+- **Time lapse and tag filter** – watch your vault grow by creation date, modification date or any date property; limit the time range, filter by tag, set the speed (1 s = 1 minute / hour / day / week / month).
+- **Video export** – record the time lapse including names and date caption as a video into your vault.
+- **Saved views** – store camera, mode, filters and time range under a name and bring them back with one click.
+- **Folder galaxies** – hovering or opening a folder in the explorer shows a glowing cloud with the folder name.
+- **Keep folders together** – notes are tied to their folder (invisible or as thin lines), so notes without links stay with their folder.
 - **Tooltip** on hover with folder, links, backlinks, tags and last change.
 - **Hide folders** – right-click a folder → *Hide in graph*.
 - **Activity heat** – recently edited notes glow warmer and pulse, so you see at a glance where work is happening.

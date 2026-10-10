@@ -2,6 +2,7 @@
 import {
   WebGLRenderer, Scene, FogExp2, PerspectiveCamera, Group, BufferGeometry, BufferAttribute, Points, LineSegments,
   ShaderMaterial, AdditiveBlending, NormalBlending, Vector2, Vector3, Raycaster, Plane, Color,
+  Sprite, SpriteMaterial, CanvasTexture,
 } from 'three';
 
 const STYLE_DEFAULT = { nodeSize: 1, degSize: 1, glow: 1, line: 1, font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, rotate: true };
@@ -129,7 +130,7 @@ export class GraphRenderer {
   setGraph(nodes, edges, adj) {
     this.nodes = nodes; this.edges = edges; this.adj = adj; this.sel = -1; this.dragK = -1; this.hover = -1;
     this.pathSet = null; this.pathEdges = null;
-    this.maxDeg = Math.max(1, ...nodes.filter((nd) => !nd.hidden).map((nd) => nd.deg * (nd.w || 1)));
+    this.maxDeg = Math.max(1, ...nodes.filter((nd) => !nd.hidden && !nd.anchor).map((nd) => nd.deg * (nd.w || 1)));
     if (this.points) { this.root.remove(this.points); this.points.geometry.dispose(); }
     if (this.lines) { this.root.remove(this.lines); this.lines.geometry.dispose(); }
     const n = nodes.length;
@@ -183,8 +184,62 @@ export class GraphRenderer {
   /* node is not drawn: filtered out (hidden) or outside the time/tag mask, unless highlighted from the explorer */
   isOff(k) {
     if (this.hl && this.hl.has(k)) return false;
-    return !!this.nodes[k].hidden || (this.mask != null && !this.mask.has(k));
+    const nd = this.nodes[k];
+    return !!nd.anchor || !!nd.hidden || (this.mask != null && !this.mask.has(k));
   }
+  /* glowing cloud behind a group of nodes (hovered/opened folder) */
+  setGalaxy(g) {
+    this.galaxy = g && g.set && g.set.size ? g : null;
+    if (!this.galaxySprite) {
+      const cv = document.createElement('canvas'); cv.width = cv.height = 256;
+      const x = cv.getContext('2d');
+      const gr = x.createRadialGradient(128, 128, 0, 128, 128, 128);
+      gr.addColorStop(0, 'rgba(255,255,255,0.55)'); gr.addColorStop(0.35, 'rgba(255,255,255,0.22)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+      x.fillStyle = gr; x.fillRect(0, 0, 256, 256);
+      this.galaxyMat = new SpriteMaterial({ map: new CanvasTexture(cv), transparent: true, depthWrite: false, depthTest: false, blending: AdditiveBlending, opacity: 0 });
+      this.galaxySprite = new Sprite(this.galaxyMat); this.galaxySprite.renderOrder = -1;
+      this.root.add(this.galaxySprite);
+      this.galaxyLabel = this.labelLayer.createDiv({ cls: 'cg-galaxy-label' }); this.galaxyLabel.toggle(false);
+    }
+    if (this.galaxy) {
+      this.galaxyMat.color.set(this.galaxy.color || '#a882ff');
+      this.galaxyMat.blending = this.light ? NormalBlending : AdditiveBlending; this.galaxyMat.needsUpdate = true;
+      this.galaxyLabel.setText(this.galaxy.name || '');
+      this.galaxyLabel.setCssProps({ '--cg-gal': this.galaxy.color || '#a882ff' });
+    }
+  }
+
+  updateGalaxy(dt) {
+    if (!this.galaxySprite) return;
+    const g = this.galaxy, mat = this.galaxyMat;
+    const goal = g ? (this.light ? 0.35 : 0.8) : 0;
+    mat.opacity += (goal - mat.opacity) * Math.min(1, dt * 6);
+    this.galaxySprite.visible = mat.opacity > 0.01;
+    if (!g) { this.galaxyLabel.toggle(false); return; }
+    let cx = 0, cy = 0, cz = 0, n = 0;
+    for (const k of g.set) { const nd = this.nodes[k]; if (!nd) continue; cx += nd.x; cy += nd.y; cz += nd.z || 0; n++; }
+    if (!n) return;
+    cx /= n; cy /= n; cz /= n;
+    const d = [];
+    for (const k of g.set) { const nd = this.nodes[k]; if (nd) d.push(Math.hypot(nd.x - cx, nd.y - cy, (nd.z || 0) - cz)); }
+    d.sort((a, b) => a - b);
+    const r = Math.max(40, d[Math.floor(d.length * 0.85)] || 40);
+    this.galaxySprite.position.set(cx, cy, cz);
+    this.galaxySprite.scale.set(r * 3, r * 3, 1);
+    const v = this.tmpV.set(cx, cy + r * 1.1, cz).applyMatrix4(this.root.matrixWorld).project(this.camera);
+    if (v.z > 1 || v.z < -1) { this.galaxyLabel.toggle(false); return; }
+    this.galaxyLabel.toggle(true);
+    this.galaxyLabel.setCssStyles({ transform: 'translate(' + Math.round((v.x + 1) / 2 * this.canvas.clientWidth) + 'px,' + Math.round((1 - v.y) / 2 * this.canvas.clientHeight) + 'px) translate(-50%, -100%)' });
+  }
+
+  /* camera state for saved views */
+  getCamera() { return { t: this.targetGoal.toArray(), yaw: this.yaw, pitch: this.pitch, dist: this.distGoal }; }
+  setCamera(c) {
+    if (!c) return;
+    this.targetGoal.fromArray(c.t); this.yaw = c.yaw; this.pitch = c.pitch; this.distGoal = c.dist;
+    this.userMoved = true; this.lastInteract = Date.now();
+  }
+
   setMask(set) { this.mask = set || null; this.paint(); this.updateLabels(true); }
 
   /* external highlight (e.g. hovering a file or folder in the file explorer) */
@@ -264,7 +319,12 @@ export class GraphRenderer {
         lc.set(h1, 6 * k); lc.set(h2, 6 * k + 3);
       } else { lc.set(ca, 6 * k); lc.set(cb, 6 * k + 3); }
       if (this.hl) alpha = this.hl.has(a) && this.hl.has(b) ? 0.6 : (this.hl.has(a) || this.hl.has(b) ? 0.25 : 0.01 + (this.style.dimOthers || 0) * 0.3);
-      if (this.isOff(a) || this.isOff(b)) alpha = 0;
+      const na = this.nodes[a], nb2 = this.nodes[b];
+      if (na.anchor || nb2.anchor) {
+        const other = na.anchor ? b : a;
+        alpha = this.anchorLines && !this.isOff(other) && !(na.anchor && nb2.anchor && !this.anchorLines) ? (this.hl ? (this.hl.has(other) ? 0.18 : 0.01) : 0.07) : 0;
+        if (na.anchor && nb2.anchor) alpha = this.anchorLines && !this.hl ? 0.05 : 0;
+      } else if (this.isOff(a) || this.isOff(b)) alpha = 0;
       lA[2 * k] = lA[2 * k + 1] = Math.min(1, alpha * w);
     }
     la.color.needsUpdate = true; la.alpha.needsUpdate = true;
@@ -360,6 +420,7 @@ export class GraphRenderer {
     if (this.hover >= 0 && !want.includes(this.hover)) want.unshift(this.hover);
     while (this.labelPool.length < want.length) this.labelPool.push(layer.createDiv({ cls: 'cg-label' }));
     const placed = [];
+    this.drawn = [];
     for (let i = 0; i < this.labelPool.length; i++) {
       const el = this.labelPool[i];
       if (i >= want.length) { el.toggle(false); continue; }
@@ -375,6 +436,7 @@ export class GraphRenderer {
       placed.push(r);
       el.toggle(true);
       const txt = nm.length > 40 ? nm.slice(0, 38) + '…' : nm;
+      this.drawn.push({ txt, x: p.x, y: p.y + 10, fs, bold, prio });
       if (el.textContent !== txt) el.setText(txt);
       el.toggleClass('is-selected', prio);
       el.toggleClass('is-ghost', !!nodes[k].ghost);
@@ -515,17 +577,67 @@ export class GraphRenderer {
     c.lookAt(t);
     this.nodeMat.uniforms.uTime.value = (now - this.t0) / 1000;
     this.stars.rotation.y += dt * 0.004;
+    this.updateGalaxy(dt);
     this.renderer.render(this.scene, c);
     this.updateLabels(false);
+    if (this.rec) this.composite();
+  }
+
+  // ------------------------------------------------------------ video capture (graph + names + caption)
+  startCapture(caption) {
+    const W = this.canvas.width, H = this.canvas.height, dpr = W / (this.canvas.clientWidth || W);
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const types = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+    const type = types.find((x) => window.MediaRecorder && MediaRecorder.isTypeSupported(x));
+    if (!type) return false;
+    const stream = cv.captureStream(30);
+    const mr = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 8000000 });
+    const chunks = [];
+    mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    this.rec = { cv, ctx: cv.getContext('2d'), mr, chunks, dpr, caption, type };
+    mr.start(500);
+    return true;
+  }
+
+  stopCapture() {
+    const rec = this.rec; this.rec = null;
+    if (!rec) return Promise.resolve(null);
+    return new Promise((res) => {
+      rec.mr.onstop = () => res(new Blob(rec.chunks, { type: rec.type.split(';')[0] }));
+      rec.mr.stop();
+    });
+  }
+
+  composite() {
+    const { cv, ctx, dpr } = this.rec;
+    ctx.drawImage(this.renderer.domElement, 0, 0, cv.width, cv.height);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    const light = this.light;
+    for (const d of this.drawn || []) {
+      ctx.font = (d.bold ? '600 ' : '400 ') + (d.fs * dpr).toFixed(1) + 'px system-ui, sans-serif';
+      ctx.shadowColor = light ? 'rgba(255,255,255,.9)' : 'rgba(168,130,255,.9)'; ctx.shadowBlur = 6 * dpr;
+      ctx.fillStyle = light ? '#222' : (d.prio ? '#fff' : '#e8e6ff');
+      ctx.fillText(d.txt, d.x * dpr, d.y * dpr);
+    }
+    ctx.shadowBlur = 0;
+    const cap = this.rec.caption && this.rec.caption();
+    if (cap) {
+      ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+      ctx.font = '600 ' + (22 * dpr) + 'px system-ui, sans-serif';
+      ctx.fillStyle = light ? 'rgba(0,0,0,.75)' : 'rgba(255,255,255,.9)';
+      ctx.fillText(cap, 20 * dpr, cv.height - 20 * dpr);
+    }
   }
 
   dispose() {
+    if (this.rec) { try { this.rec.mr.stop(); } catch { /* ignore */ } this.rec = null; }
     this.disposed = true;
     window.cancelAnimationFrame(this.raf);
     (this.unbind || []).forEach((f) => f());
     if (!this.active) return;
     for (const o of [this.points, this.lines, this.stars]) if (o) o.geometry.dispose();
     this.nodeMat.dispose(); this.lineMat.dispose(); this.starMat.dispose();
+    if (this.galaxyMat) { this.galaxyMat.map.dispose(); this.galaxyMat.dispose(); }
     this.renderer.dispose();
     try { this.renderer.forceContextLoss(); } catch { /* ignore */ }
   }

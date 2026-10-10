@@ -144,3 +144,11 @@
 /* hidden folders in the explorer */
 .cg-fc-hidden > .nav-folder-title { opacity: .55; }
 .cg-fc-hidden > .nav-folder-title .nav-folder-title-content { text-decoration: line-through; text-decoration-color: color-mix(in srgb, currentColor 50%, transparent); }
+
+/* Folder galaxy label */
+.cg-galaxy-label { position: absolute; left: 0; top: 0; pointer-events: none; white-space: nowrap; font-size: 18px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--cg-gal); text-shadow: 0 0 12px var(--cg-gal), 0 0 3px #000; opacity: .95; }
+.theme-light .cg-root:not(.is-space) .cg-galaxy-label { text-shadow: 0 0 2px var(--background-primary); }
+.cg-time-rec.clickable-icon { width: 30px; height: 30px; border-radius: 50%; }
+.cg-time-rec.is-recording { background: #e5484d; color: #fff; animation: cg-rec 1s ease-in-out infinite; }
+@keyframes cg-rec { 50% { opacity: .55; } }

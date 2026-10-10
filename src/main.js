@@ -8,7 +8,7 @@ const STYLE_DEFAULTS = { center: 2, repel: 10, link: 1, dist: 32, range: 250, no
   font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, dimOthers: 0.04 };
 const DEFAULTS = {
   layout: '3d', background: 'space', colorBy: 'obsidian', filters: true, orphans: false, labels: true, rotate: true,
-  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], style: Object.assign({}, STYLE_DEFAULTS),
+  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], folderLinks: 'hidden', galaxies: true, views: [], style: Object.assign({}, STYLE_DEFAULTS),
 };
 
 export default class CortexGraphPlugin extends Plugin {
@@ -86,6 +86,7 @@ export default class CortexGraphPlugin extends Plugin {
     this.settings.folderColors = Object.assign({}, d.folderColors || {});
     this.settings.folderWeights = Object.assign({}, d.folderWeights || {});
     this.settings.hiddenFolders = Array.isArray(d.hiddenFolders) ? d.hiddenFolders.slice() : [];
+    this.settings.views = Array.isArray(d.views) ? d.views.slice() : [];
     this.settings.style = Object.assign({}, STYLE_DEFAULTS, d.style || {});
   }
   async saveSettings() { await this.saveData(this.settings); }
@@ -165,6 +166,10 @@ class CortexGraphSettingTab extends PluginSettingTab {
       .addOption('rows', t('sExplorerRows')).addOption('folders', t('sExplorerFolders')).addOption('off', t('sExplorerOff')).setValue(s.explorerColors)
       .onChange((v) => { s.explorerColors = v; p.saveSettings(); p.fc.apply(); }));
     new Setting(el).setName(t('sFilters')).setDesc(t('sFiltersDesc')).addToggle((tg) => tg.setValue(s.filters).onChange((v) => { s.filters = v; save('data'); }));
+    new Setting(el).setName(t('sFolderLinks')).setDesc(t('sFolderLinksDesc')).addDropdown((d) => d
+      .addOption('off', t('sFlOff')).addOption('hidden', t('sFlHidden')).addOption('lines', t('sFlLines')).setValue(s.folderLinks)
+      .onChange((v) => { s.folderLinks = v; save('layout'); }));
+    new Setting(el).setName(t('sGalaxies')).setDesc(t('sGalaxiesDesc')).addToggle((tg) => tg.setValue(s.galaxies !== false).onChange((v) => { s.galaxies = v; p.saveSettings(); }));
     new Setting(el).setName(t('sOrphans')).addToggle((tg) => tg.setValue(s.orphans).onChange((v) => { s.orphans = v; save('data'); }));
     new Setting(el).setName(t('sLabels')).addToggle((tg) => tg.setValue(s.labels).onChange((v) => { s.labels = v; save('style'); p.views().forEach((w) => w.updateToolbar()); }));
     new Setting(el).setName(t('sRotate')).addToggle((tg) => tg.setValue(s.rotate).onChange((v) => { s.rotate = v; save('style'); }));
