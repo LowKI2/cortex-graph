@@ -82,6 +82,20 @@ export class CortexGraphView extends ItemView {
     this.registerEvent(this.app.workspace.on('css-change', () => this.applyTheme()));
     this.registerInterval(window.setInterval(() => { if (this.activity) this.applyHeat(); }, 60000));
     this.registerDomEvent(root, 'keydown', (e) => this.onKey(e));
+    // hovering a file or folder in the file explorer lights up its nodes
+    let hlPath = null;
+    const hlFrom = (el) => {
+      const it = el instanceof Element ? el.closest('.nav-file-title[data-path], .nav-folder-title[data-path]') : null;
+      return it && !this.contentEl.contains(it) ? it : null;
+    };
+    this.registerDomEvent(document, 'mouseover', (e) => {
+      const it = hlFrom(e.target);
+      const p = it ? it.getAttribute('data-path') : null;
+      if (p === hlPath) return;
+      hlPath = p;
+      this.highlightPath(p, it ? it.hasClass('nav-folder-title') : false);
+    });
+    this.registerDomEvent(document, 'mouseleave', () => { hlPath = null; this.highlightPath(null); });
     root.tabIndex = 0;
 
     this.updateToolbar();
@@ -266,6 +280,15 @@ export class CortexGraphView extends ItemView {
     const G = this.G;
     const real = G.nodes.filter((nd) => !nd.ghost).length;
     this.info.setText(real + ' ' + t('notes') + ' · ' + G.edges.length + ' ' + t('links'));
+  }
+
+  highlightPath(path, folder) {
+    if (!this.R || !this.R.active) return;
+    if (!path) { this.R.setHighlight(null); return; }
+    const set = new Set();
+    if (folder) { const pre = path === '/' ? '' : path + '/'; this.G.nodes.forEach((nd, k) => { if (nd.note && nd.note.path.startsWith(pre)) set.add(k); }); }
+    else { const k = this.G.idx.get(path); if (k != null) set.add(k); }
+    this.R.setHighlight(set);
   }
 
   // ============================================================ interaction

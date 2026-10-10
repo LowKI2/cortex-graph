@@ -179,6 +179,12 @@ export class GraphRenderer {
   /* colors: array of hex|null per node (problem mode), dim: Set of nodes that stay bright (others dimmed) */
   setOverlay(colors, bright) { this.colorOverride = colors; this.dimSet = bright; this.refreshColors(); this.updateLabels(true); }
 
+  /* external highlight (e.g. hovering a file or folder in the file explorer) */
+  setHighlight(set) {
+    this.hl = set && set.size ? set : null;
+    this.paint(); this.updateLabels(true);
+  }
+
   setPath(path) {
     if (!path) { this.pathSet = null; this.pathEdges = null; }
     else {
@@ -228,6 +234,7 @@ export class GraphRenderer {
       else if (nb) { if (!nb.has(k)) a = dimA; s *= k === sel ? 1.8 : (nb.has(k) ? 1.25 : 1); }
       if (bright && !bright.has(k)) a = Math.min(a, 0.22);
       else if (bright && this.colorOverride && this.colorOverride[k]) { s = Math.max(s, 26) * 1.7; }
+      if (this.hl) { if (this.hl.has(k)) { s = Math.max(s, 22) * 1.7; c = mix(c, [1, 1, 1], 0.35); a = 1; } else a = Math.min(a, this.light ? 0.25 : 0.18); }
       if (k === this.hover) s *= 1.35;
       al[k] = a; sz[k] = s; col[3 * k] = c[0]; col[3 * k + 1] = c[1]; col[3 * k + 2] = c[2];
     }
@@ -338,6 +345,7 @@ export class GraphRenderer {
         want = idx.slice(0, st.maxLabels);
       }
     }
+    if (this.hl && this.hl.size <= 60) want = [...this.hl, ...want.filter((k) => !this.hl.has(k))];
     if (this.hover >= 0 && !want.includes(this.hover)) want.unshift(this.hover);
     while (this.labelPool.length < want.length) this.labelPool.push(layer.createDiv({ cls: 'cg-label' }));
     const placed = [];
@@ -351,7 +359,7 @@ export class GraphRenderer {
       const bold = k === sel || k === this.hover || nodes[k].deg >= st.boldFrom;
       const w = Math.min(40, nm.length) * fs * 0.56 + 6;
       const r = [p.x - w / 2, p.y + 8, p.x + w / 2, p.y + 10 + fs * 1.3];
-      const prio = k === sel || k === this.hover;
+      const prio = k === sel || k === this.hover || (this.hl && this.hl.size === 1 && this.hl.has(k));
       if (!prio && placed.some((q) => r[0] < q[2] && r[2] > q[0] && r[1] < q[3] && r[3] > q[1])) { el.toggle(false); continue; }
       placed.push(r);
       el.toggle(true);

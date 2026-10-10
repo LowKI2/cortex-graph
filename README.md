@@ -14,6 +14,7 @@ Works on **desktop and mobile** (touch controls included).
   - hover preview (Page preview core plugin, with Ctrl/Cmd by default)
   - right-click shows the normal file menu
 - **Local graph** that follows the active note (depth 1–3), also in the sidebar.
+- **Explorer hover** – hovering a file in the file explorer lights up its node, hovering a folder lights up all notes inside.
 - **Activity heat** – recently edited notes glow warmer and pulse, so you see at a glance where work is happening.
 - **Shortest path** between two notes – pick "Path from here", then the target. Also available as a command.
 - **Fly-to search** – type a name, the camera flies to the note.
