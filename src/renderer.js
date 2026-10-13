@@ -567,16 +567,16 @@ export class GraphRenderer {
       if (p.z > 1 || p.z < -1) { el.toggle(false); continue; }
       const nm = nodes[k].label;
       // log scale: spreads the many small notes apart from the hubs instead of squeezing them together
-      const fs = st.font * (1 + st.fontGrow * 2.5 * Math.log1p(rk(nodes[k])) / Math.log1p(this.maxDeg)) * (k === sel ? 1.15 : 1);
+      const fsz = st.font * (1 + st.fontGrow * 2.5 * Math.log1p(rk(nodes[k])) / Math.log1p(this.maxDeg)) * (k === sel ? 1.15 : 1);
       const bold = k === sel || k === this.hover || rk(nodes[k]) >= st.boldFrom;
-      const w = Math.min(40, nm.length) * fs * 0.56 + 6;
-      const r = [p.x - w / 2, p.y + 8, p.x + w / 2, p.y + 10 + fs * 1.3];
+      const w = Math.min(40, nm.length) * fsz * 0.56 + 6;
+      const r = [p.x - w / 2, p.y + 8, p.x + w / 2, p.y + 10 + fsz * 1.3];
       const prio = k === sel || k === this.hover || (this.hl && this.hl.size === 1 && this.hl.has(k));
       if (!prio && placed.some((q) => r[0] < q[2] && r[2] > q[0] && r[1] < q[3] && r[3] > q[1])) { el.toggle(false); continue; }
       placed.push(r);
       el.toggle(true);
       const txt = nm.length > 40 ? nm.slice(0, 38) + '…' : nm;
-      this.drawn.push({ txt, x: p.x, y: p.y + 10, fs, bold, prio });
+      this.drawn.push({ txt, x: p.x, y: p.y + 10, fsz, bold, prio });
       if (el.textContent !== txt) el.setText(txt);
       el.toggleClass('is-selected', prio);
       el.toggleClass('is-ghost', !!nodes[k].ghost);
@@ -586,7 +586,7 @@ export class GraphRenderer {
       this.drawn[this.drawn.length - 1].c = lc;
       el.setCssStyles({
         transform: 'translate(' + Math.round(p.x) + 'px,' + Math.round(p.y + 10) + 'px) translateX(-50%)',
-        fontSize: fs.toFixed(1) + 'px', fontWeight: bold ? '600' : '400',
+        fontSize: fsz.toFixed(1) + 'px', fontWeight: bold ? '600' : '400',
         opacity: (sel >= 0 || this.pathSet) && !prio ? '0.85' : '1',
       });
     }
@@ -789,9 +789,9 @@ export class GraphRenderer {
     const light = this.light;
     for (const d of this.drawn || []) {
       const ls = this.style.labelStyle || 'glow';
-      ctx.font = (d.bold ? '600 ' : '400 ') + (d.fs * dpr).toFixed(1) + 'px ' + (this.fontStack || 'system-ui, sans-serif');
+      ctx.font = (d.bold ? '600 ' : '400 ') + (d.fsz * dpr).toFixed(1) + 'px ' + (this.fontStack || 'system-ui, sans-serif');
       if (ls === 'pill' && d.c) {
-        const tw = ctx.measureText(d.txt).width, h = d.fs * 1.3 * dpr;
+        const tw = ctx.measureText(d.txt).width, h = d.fsz * 1.3 * dpr;
         ctx.shadowBlur = 0; ctx.globalAlpha = 0.45; ctx.fillStyle = d.c;
         ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(d.x * dpr - tw / 2 - 5 * dpr, d.y * dpr - 1 * dpr, tw + 10 * dpr, h, h / 2); else ctx.rect(d.x * dpr - tw / 2 - 5 * dpr, d.y * dpr - 1 * dpr, tw + 10 * dpr, h);
         ctx.fill(); ctx.globalAlpha = 1;

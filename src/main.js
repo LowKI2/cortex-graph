@@ -1,5 +1,7 @@
-import { Plugin, PluginSettingTab, Setting, FuzzySuggestModal, Modal, Notice, TFolder, TFile, debounce, getAllTags } from 'obsidian';
-import HOOK_SRC from '../tools/cortex-activity-hook.mjs';
+import { Plugin, PluginSettingTab, Setting, FuzzySuggestModal, Modal, Notice, TFolder, TFile, FileSystemAdapter, debounce, getAllTags } from 'obsidian';
+
+const HOOK_URL = 'https://github.com/LowKI2/cortex-graph/blob/main/tools/cortex-activity-hook.mjs';
+const vaultBase = (app) => (app.vault.adapter instanceof FileSystemAdapter ? app.vault.adapter.getBasePath() : '').replace(/\\/g, '/');
 import { parseGraphCfg } from './model';
 import { FolderColors } from './folders';
 import { CortexGraphView, VIEW_TYPE, DEFAULT_KEYS, DEFAULT_MOUSE, KEY_ACTIONS } from './view';
@@ -94,7 +96,7 @@ export default class CortexGraphPlugin extends Plugin {
         try {
           const ev = JSON.parse(line);
           let path = String(ev.path || '').replace(/\\/g, '/');
-          const base = (ad.basePath || '').replace(/\\/g, '/');
+          const base = vaultBase(this.app);
           if (base && path.toLowerCase().startsWith(base.toLowerCase() + '/')) path = path.slice(base.length + 1);
           if (path) this.activity(path, ev.op === 'write' ? 'write' : 'read');
         } catch { /* skip broken line */ }
@@ -271,17 +273,16 @@ class CortexGraphSettingTab extends PluginSettingTab {
 /* explains the activity log and installs the hook script for Claude Code (or any tool with hooks) */
 class HookModal extends Modal {
   onOpen() {
-    const { contentEl } = this, ad = this.app.vault.adapter;
-    const base = (ad.basePath || '').replace(/\\/g, '/');
+    const { contentEl } = this;
+    const base = vaultBase(this.app);
     const script = (base ? base + '/' : '') + '.cortex/cortex-activity-hook.mjs';
     this.titleEl.setText(t('hookTitle'));
     contentEl.createEl('p', { text: t('hookIntro') });
     contentEl.createEl('pre', { cls: 'cg-code', text: '{"op":"read","path":"30 Wissen/Blender.md"}' });
     contentEl.createEl('h4', { text: t('hookStep1') });
-    new Setting(contentEl).setName('.cortex/cortex-activity-hook.mjs').setDesc(t('hookStep1Desc')).addButton((b) => b.setButtonText(t('hookSave')).setCta().onClick(async () => {
-      if (!(await ad.exists('.cortex'))) await ad.mkdir('.cortex');
-      await ad.write('.cortex/cortex-activity-hook.mjs', HOOK_SRC);
-      new Notice(t('hookSaved'));
+    // the script is not bundled with the plugin (the plugin itself never touches files outside the vault API)
+    new Setting(contentEl).setName('cortex-activity-hook.mjs').setDesc(t('hookStep1Desc')).addButton((b) => b.setButtonText(t('hookSave')).setCta().onClick(() => {
+      window.open(HOOK_URL);
     }));
     contentEl.createEl('h4', { text: t('hookStep2') });
     contentEl.createEl('p', { text: t('hookStep2Desc') });

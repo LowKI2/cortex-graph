@@ -11,11 +11,11 @@ const ctx = await esbuild.context({
   external: ['obsidian', 'electron', '@codemirror/*', '@lezer/*'],
   format: 'cjs',
   target: 'es2020',
-  loader: { '.worker.js': 'text', '.mjs': 'text' },
+  loader: { '.worker.js': 'text' },
   logLevel: 'info',
   sourcemap: prod ? false : 'inline',
   treeShaking: true,
-  minify: prod,
+  minifyWhitespace: prod, minifySyntax: prod, minifyIdentifiers: false, // readable names: avoids false positives in the directory's code scan (e.g. a variable named fs)
   outfile: 'main.js',
 });
 if (prod) { await ctx.rebuild(); process.exit(0); } else { await ctx.watch(); }

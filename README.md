@@ -82,7 +82,7 @@ The plugin watches `<vault>/.cortex/activity.jsonl`. Append one JSON object per 
 
 ### Claude Code
 
-1. Plugin settings → *Show reads by AI tools* → **Set up…** → *Save script*. This puts [`tools/cortex-activity-hook.mjs`](tools/cortex-activity-hook.mjs) into `.cortex/` of your vault (Node.js 18+).
+1. Download [`tools/cortex-activity-hook.mjs`](tools/cortex-activity-hook.mjs) and save it as `.cortex/cortex-activity-hook.mjs` in your vault (Node.js 18+). The plugin itself does not ship or write this script – *Show reads by AI tools* → **Set up…** links here and shows the snippet with your vault path.
 2. Copy the shown snippet into `~/.claude/settings.json`:
 
 ```json
