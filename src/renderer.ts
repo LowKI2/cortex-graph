@@ -4,8 +4,28 @@ import {
   ShaderMaterial, LineDashedMaterial, AdditiveBlending, NormalBlending, Vector2, Vector3, Raycaster, Plane, Color,
   Sprite, SpriteMaterial, CanvasTexture,
 } from 'three';
+import type { Edge, GNode, MouseSettings, StyleSettings } from './types';
 
-export const LABEL_FONTS = {
+type RGB = number[];
+/* geometry whose attributes are plain Float32Array buffers */
+type F32Attr = BufferAttribute & { array: Float32Array };
+type Geo = BufferGeometry<Record<string, F32Attr>>;
+type Uniforms = Record<string, { value: number }>;
+interface Mat extends ShaderMaterial { uniforms: Uniforms }
+export type RStyle = Partial<StyleSettings> & {
+  nodeSize: number; degSize: number; glow: number; line: number; nodeBright: number; font: number; fontGrow: number;
+  boldFrom: number; labelFrom: number; maxLabels: number; rotate: boolean; labelFont?: string; labelStyle?: string;
+};
+export interface Galaxy { set: Set<number>; color?: string; name?: string }
+interface Flash { t: number; c: RGB; f: number }
+interface DrawnLabel { txt: string; x: number; y: number; fsz: number; bold: boolean; prio: boolean; c?: string }
+interface Recording { cv: HTMLCanvasElement; ctx: CanvasRenderingContext2D; mr: MediaRecorder; chunks: Blob[]; dpr: number; caption: (() => string) | null; type: string }
+interface Gesture { t: number; x0: number; y0: number; moved: number; drag: number; pan: boolean; link: number; btn: number; ev: PointerEvent }
+type LabelEl = HTMLDivElement & { cgLc?: string };
+const newGeo = (): Geo => new BufferGeometry<Record<string, F32Attr>>();
+const fattr = (a: Float32Array, n: number): F32Attr => new BufferAttribute(a, n) as F32Attr;
+
+export const LABEL_FONTS: Record<string, string | null> = {
   ui: null, text: null,
   sans: "'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
   serif: "Georgia, 'Times New Roman', serif",
@@ -13,21 +33,58 @@ export const LABEL_FONTS = {
   narrow: "Bahnschrift, 'Arial Narrow', 'Roboto Condensed', sans-serif",
   round: "ui-rounded, 'SF Pro Rounded', 'Segoe UI Variable Display', 'Nunito', sans-serif",
 };
-const cssVarFont = (v) => { try { return getComputedStyle(document.body).getPropertyValue(v).trim() || 'system-ui, sans-serif'; } catch { return 'system-ui, sans-serif'; } };
-const STYLE_DEFAULT = { nodeSize: 1, degSize: 1, glow: 1, line: 1, nodeBright: 1, font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, rotate: true };
+const cssVarFont = (v: string): string => { try { return getComputedStyle(document.body).getPropertyValue(v).trim() || 'system-ui, sans-serif'; } catch { return 'system-ui, sans-serif'; } };
+const STYLE_DEFAULT: RStyle = { nodeSize: 1, degSize: 1, glow: 1, line: 1, nodeBright: 1, font: 12, fontGrow: 0.4, boldFrom: 10, labelFrom: 6, maxLabels: 30, rotate: true };
 
-function hexToRgb(h) {
+function hexToRgb(h: string): RGB {
   const v = parseInt(String(h).replace('#', '').slice(0, 6), 16) || 0;
   return [(v >> 16 & 255) / 255, (v >> 8 & 255) / 255, (v & 255) / 255];
 }
-function boost(rgb) { const mx = Math.max(rgb[0], rgb[1], rgb[2]) || 1; return rgb.map((c) => Math.min(1, 0.15 + (c / mx) * 0.95)); }
-function mix(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+function boost(rgb: RGB): RGB { const mx = Math.max(rgb[0], rgb[1], rgb[2]) || 1; return rgb.map((c) => Math.min(1, 0.15 + (c / mx) * 0.95)); }
+function mix(a: RGB, b: RGB, t: number): RGB { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
 const HEAT_RGB = [1, 0.62, 0.22];
-const rk = (nd) => (nd.rank != null ? nd.rank : nd.deg) * (nd.w || 1); // label rank: importance (or connections) x folder weight
+const rk = (nd: GNode): number => (nd.rank != null ? nd.rank : nd.deg) * (nd.w || 1); // label rank: importance (or connections) x folder weight
 const PATH_RGB = [1, 0.86, 0.35];
 
 export class GraphRenderer {
-  constructor(canvas, labelLayer, anchor) {
+  canvas: HTMLCanvasElement; labelLayer: HTMLElement; anchor: HTMLElement;
+  active = false;
+  onTap: ((k: number, dbl: boolean, e: PointerEvent) => void) | null = null;
+  onDrag: ((k: number, x: number, y: number, z: number) => void) | null = null;
+  onDragEnd: ((k: number) => void) | null = null;
+  onHover: ((k: number, e: PointerEvent, x: number, y: number) => void) | null = null;
+  onContext: ((k: number, e: MouseEvent) => void) | null = null;
+  onContextEmpty: ((e: MouseEvent) => void) | null = null;
+  onLink: ((a: number, b: number) => void) | null = null;
+  showLabels = true;
+  anchorLines = false;
+  mouse: Partial<MouseSettings> | null = null;
+  fresh: Set<number> | null = null;
+  renderer: WebGLRenderer; scene: Scene; camera: PerspectiveCamera; root: Group;
+  nodeMat: Mat; baseMat: Mat; starMat: Mat; lineMat: ShaderMaterial;
+  nodes: GNode[] = []; edges: Edge[] = []; adj: number[][] = [];
+  points: Points<Geo, Mat> | null = null; basePoints: Points<Geo, Mat> | null = null;
+  lines: LineSegments<Geo, ShaderMaterial> | null = null; stars: Points<Geo, Mat>;
+  sel = -1; dragK = -1; hover = -1;
+  style: RStyle;
+  maxDeg = 1; baseColor: RGB[] = []; baseSize: number[] = []; heat: Float32Array | null = null;
+  colorOverride: (string | null)[] | null = null; dimSet: Set<number> | null = null;
+  pathSet: Set<number> | null = null; pathEdges: Set<string> | null = null;
+  target: Vector3; targetGoal: Vector3;
+  yaw = 0.6; pitch = 0.35; dist = 900; distGoal = 900; lastInteract = 0; userMoved = false;
+  labelPool: LabelEl[] = []; labelTick = 0; tmpV: Vector3;
+  light = false; t0 = 0; clockT = 0; raf = 0; disposed = false;
+  flashes = new Map<number, Flash>(); flashLabel: { k: number; until: number } | null = null;
+  galaxy: Galaxy | null = null; galaxyMat: SpriteMaterial | null = null; galaxySprite: Sprite | null = null; galaxyLabel: HTMLDivElement | null = null;
+  mask: Set<number> | null = null; hl: Set<number> | null = null;
+  suggest: Edge[] | null = null; sugLines: LineSegments<Geo, LineDashedMaterial> | null = null; sugMat: LineDashedMaterial | null = null; sugTick = 0;
+  camBefore: (ReturnType<GraphRenderer['getCamera']> & { moved: boolean }) | null = null;
+  fontStack = ''; drawn: DrawnLabel[] = [];
+  linkSvg: SVGSVGElement | null = null; linkPath: SVGLineElement | null = null;
+  rec: Recording | null = null;
+  unbind: (() => void)[] = [];
+
+  constructor(canvas: HTMLCanvasElement, labelLayer: HTMLElement, anchor: HTMLElement) {
     this.canvas = canvas; this.labelLayer = labelLayer; this.anchor = anchor;
     this.active = false;
     this.onTap = null; this.onDrag = null; this.onDragEnd = null; this.onHover = null; this.onContext = null;
@@ -66,7 +123,7 @@ export class GraphRenderer {
     this.raf = window.requestAnimationFrame(() => this.frame());
   }
 
-  nodeBaseMaterial() {
+  nodeBaseMaterial(): Mat {
     return new ShaderMaterial({
       uniforms: { uScale: { value: 300 }, uMin: { value: 0.5 }, uBright: { value: 1.0 } },
       vertexShader: `
@@ -97,7 +154,7 @@ export class GraphRenderer {
     });
   }
 
-  glowMaterial(coreAmt, fog) {
+  glowMaterial(coreAmt: number, fog: boolean): Mat {
     return new ShaderMaterial({
       uniforms: { uScale: { value: 300 }, uCore: { value: coreAmt }, uMin: { value: fog ? 0.5 : 0.0 }, uGlow: { value: 1.0 }, uRad: { value: 1.0 }, uPx: { value: 1.0 }, uSizeK: { value: 1.0 }, uBright: { value: 1.0 }, uTime: { value: 0 }, uLight: { value: 0 } },
       vertexShader: `
@@ -148,7 +205,7 @@ export class GraphRenderer {
     });
   }
 
-  makeStars() {
+  makeStars(): void {
     const N = 1600, p = new Float32Array(N * 3), c = new Float32Array(N * 3), s = new Float32Array(N), a = new Float32Array(N), h = new Float32Array(N);
     for (let i = 0; i < N; i++) {
       const r = 3500 + Math.random() * 5000, th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
@@ -156,19 +213,19 @@ export class GraphRenderer {
       const t = Math.random(); c[3 * i] = 0.6 + 0.4 * t; c[3 * i + 1] = 0.65 + 0.3 * t; c[3 * i + 2] = 1;
       s[i] = 18 + Math.random() * 40; a[i] = 0.25 + Math.random() * 0.5;
     }
-    const g = new BufferGeometry();
-    g.setAttribute('position', new BufferAttribute(p, 3));
-    g.setAttribute('color', new BufferAttribute(c, 3));
-    g.setAttribute('size', new BufferAttribute(s, 1));
-    g.setAttribute('alpha', new BufferAttribute(a, 1));
-    g.setAttribute('heat', new BufferAttribute(h, 1));
-    g.setAttribute('shape', new BufferAttribute(new Float32Array(N), 1));
+    const g = newGeo();
+    g.setAttribute('position', fattr(p, 3));
+    g.setAttribute('color', fattr(c, 3));
+    g.setAttribute('size', fattr(s, 1));
+    g.setAttribute('alpha', fattr(a, 1));
+    g.setAttribute('heat', fattr(h, 1));
+    g.setAttribute('shape', fattr(new Float32Array(N), 1));
     this.stars = new Points(g, this.starMat); this.stars.frustumCulled = false;
     this.scene.add(this.stars);
   }
 
   /* theme: {space:boolean, bg:'#rrggbb', light:boolean} */
-  setTheme(th) {
+  setTheme(th: { space?: boolean; bg?: string; light?: boolean }): void {
     if (!this.active) return;
     const space = th.space !== false;
     const bg = space ? '#07070d' : (th.bg || '#1e1e1e');
@@ -183,7 +240,7 @@ export class GraphRenderer {
     if (this.points) this.paint();
   }
 
-  setGraph(nodes, edges, adj) {
+  setGraph(nodes: GNode[], edges: Edge[], adj: number[][]): void {
     this.nodes = nodes; this.edges = edges; this.adj = adj; this.sel = -1; this.dragK = -1; this.hover = -1;
     this.pathSet = null; this.pathEdges = null;
     this.maxDeg = Math.max(1, ...nodes.filter((nd) => !nd.hidden && !nd.anchor).map(rk));
@@ -193,20 +250,20 @@ export class GraphRenderer {
     const n = nodes.length;
     const pos = new Float32Array(n * 3);
     for (let k = 0; k < n; k++) { const nd = nodes[k]; pos[3 * k] = nd.x || 0; pos[3 * k + 1] = nd.y || 0; pos[3 * k + 2] = nd.z || 0; }
-    const g = new BufferGeometry();
-    g.setAttribute('position', new BufferAttribute(pos, 3));
-    g.setAttribute('color', new BufferAttribute(new Float32Array(n * 3), 3));
-    g.setAttribute('size', new BufferAttribute(new Float32Array(n), 1));
-    g.setAttribute('alpha', new BufferAttribute(new Float32Array(n), 1));
-    g.setAttribute('heat', new BufferAttribute(new Float32Array(n), 1));
-    g.setAttribute('shape', new BufferAttribute(new Float32Array(n), 1));
+    const g = newGeo();
+    g.setAttribute('position', fattr(pos, 3));
+    g.setAttribute('color', fattr(new Float32Array(n * 3), 3));
+    g.setAttribute('size', fattr(new Float32Array(n), 1));
+    g.setAttribute('alpha', fattr(new Float32Array(n), 1));
+    g.setAttribute('heat', fattr(new Float32Array(n), 1));
+    g.setAttribute('shape', fattr(new Float32Array(n), 1));
     this.basePoints = new Points(g, this.baseMat); this.basePoints.frustumCulled = false; this.basePoints.renderOrder = 9; this.root.add(this.basePoints);
     this.points = new Points(g, this.nodeMat); this.points.frustumCulled = false; this.points.renderOrder = 10; this.root.add(this.points);
     const m = edges.length;
-    const lg = new BufferGeometry();
-    lg.setAttribute('position', new BufferAttribute(new Float32Array(m * 6), 3));
-    lg.setAttribute('color', new BufferAttribute(new Float32Array(m * 6), 3));
-    lg.setAttribute('alpha', new BufferAttribute(new Float32Array(m * 2), 1));
+    const lg = newGeo();
+    lg.setAttribute('position', fattr(new Float32Array(m * 6), 3));
+    lg.setAttribute('color', fattr(new Float32Array(m * 6), 3));
+    lg.setAttribute('alpha', fattr(new Float32Array(m * 2), 1));
     this.lines = new LineSegments(lg, this.lineMat); this.lines.frustumCulled = false; this.root.add(this.lines);
     this.heat = new Float32Array(n);
     this.flashes = new Map();
@@ -217,7 +274,7 @@ export class GraphRenderer {
   }
 
   /* recompute base colors (after color/heat/problem changes) */
-  refreshColors() {
+  refreshColors(): void {
     this.baseColor = []; this.baseSize = [];
     for (let k = 0; k < this.nodes.length; k++) {
       const nd = this.nodes[k];
@@ -233,7 +290,7 @@ export class GraphRenderer {
     this.paint();
   }
 
-  setHeat(arr) { // Float32Array(n) or null
+  setHeat(arr: Float32Array | null): void { // Float32Array(n) or null
     if (!this.points) return;
     this.heat = arr || new Float32Array(this.nodes.length);
     const ha = this.points.geometry.attributes.heat.array;
@@ -243,19 +300,19 @@ export class GraphRenderer {
   }
 
   /* colors: array of hex|null per node (problem mode), dim: Set of nodes that stay bright (others dimmed) */
-  setOverlay(colors, bright) { this.colorOverride = colors; this.dimSet = bright; this.refreshColors(); this.updateLabels(true); }
+  setOverlay(colors: (string | null)[] | null, bright: Set<number> | null): void { this.colorOverride = colors; this.dimSet = bright; this.refreshColors(); this.updateLabels(true); }
 
   /* node is not drawn: filtered out (hidden) or outside the time/tag mask, unless highlighted from the explorer */
-  isOff(k) {
+  isOff(k: number): boolean {
     if (this.hl && this.hl.has(k)) return false;
     const nd = this.nodes[k];
     return !!nd.anchor || !!nd.hidden || (this.mask != null && !this.mask.has(k));
   }
   /* glowing cloud behind a group of nodes (hovered/opened folder) */
-  setGalaxy(g) {
+  setGalaxy(g: Galaxy | null): void {
     this.galaxy = g && g.set && g.set.size ? g : null;
     if (!this.galaxySprite) {
-      const cv = document.createElement('canvas'); cv.width = cv.height = 256;
+      const cv = createEl('canvas'); cv.width = cv.height = 256;
       const x = cv.getContext('2d');
       const gr = x.createRadialGradient(128, 128, 0, 128, 128, 128);
       gr.addColorStop(0, 'rgba(255,255,255,0.55)'); gr.addColorStop(0.35, 'rgba(255,255,255,0.22)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
@@ -273,8 +330,8 @@ export class GraphRenderer {
     }
   }
 
-  updateGalaxy(dt) {
-    if (!this.galaxySprite) return;
+  updateGalaxy(dt: number): void {
+    if (!this.galaxySprite || !this.galaxyMat || !this.galaxyLabel) return;
     const g = this.galaxy, mat = this.galaxyMat;
     const goal = g ? (this.light ? 0.35 : 0.8) : 0;
     mat.opacity += (goal - mat.opacity) * Math.min(1, dt * 6);
@@ -297,16 +354,16 @@ export class GraphRenderer {
   }
 
   /* camera state for saved views */
-  getCamera() { return { t: this.targetGoal.toArray(), yaw: this.yaw, pitch: this.pitch, dist: this.distGoal }; }
-  setCamera(c) {
+  getCamera(): { t: number[]; yaw: number; pitch: number; dist: number } { return { t: this.targetGoal.toArray(), yaw: this.yaw, pitch: this.pitch, dist: this.distGoal }; }
+  setCamera(c: { t: number[]; yaw: number; pitch: number; dist: number } | null | undefined): void {
     if (!c) return;
     this.targetGoal.fromArray(c.t); this.yaw = c.yaw; this.pitch = c.pitch; this.distGoal = c.dist;
     this.userMoved = true; this.lastInteract = Date.now();
   }
 
-  setMask(set) { this.mask = set || null; this.paint(); this.updateLabels(true); }
+  setMask(set: Set<number> | null): void { this.mask = set || null; this.paint(); this.updateLabels(true); }
 
-  applyShapes() {
+  applyShapes(): void {
     if (!this.points) return;
     const sh = this.points.geometry.attributes.shape;
     for (let k = 0; k < this.nodes.length; k++) sh.array[k] = this.nodes[k].shape || 0;
@@ -314,13 +371,13 @@ export class GraphRenderer {
   }
 
   /* short flash on a node, e.g. Claude reading (cyan) or writing (orange) it */
-  flash(k, kind) {
+  flash(k: number, kind: string): void {
     if (!this.points || k == null || k < 0) return;
     this.flashes.set(k, { t: performance.now(), c: kind === 'write' ? [1, 0.55, 0.2] : [0.35, 0.9, 1], f: 1 });
     this.flashLabel = { k, until: performance.now() + 2500 };
   }
 
-  updateFlashes() {
+  updateFlashes(): void {
     if (!this.flashes || !this.flashes.size) return;
     const now = performance.now();
     for (const [k, fl] of this.flashes) { fl.f = Math.max(0, 1 - (now - fl.t) / 2500); if (fl.f <= 0) this.flashes.delete(k); }
@@ -328,19 +385,19 @@ export class GraphRenderer {
   }
 
   /* dashed lines for link suggestions: [[a, b], ...] */
-  setSuggestions(pairs) {
+  setSuggestions(pairs: Edge[] | null): void {
     this.suggest = pairs;
     if (this.sugLines) { this.root.remove(this.sugLines); this.sugLines.geometry.dispose(); this.sugLines = null; }
     if (!pairs || !pairs.length || !this.points) return;
-    const g = new BufferGeometry();
-    g.setAttribute('position', new BufferAttribute(new Float32Array(pairs.length * 6), 3));
+    const g = newGeo();
+    g.setAttribute('position', fattr(new Float32Array(pairs.length * 6), 3));
     if (!this.sugMat) this.sugMat = new LineDashedMaterial({ color: 0xffc04d, dashSize: 5, gapSize: 4, transparent: true, opacity: 0.85, depthWrite: false });
     this.sugLines = new LineSegments(g, this.sugMat); this.sugLines.frustumCulled = false; this.root.add(this.sugLines);
     this.syncSuggest();
   }
 
-  syncSuggest() {
-    if (!this.sugLines) return;
+  syncSuggest(): void {
+    if (!this.sugLines || !this.suggest) return;
     const lp = this.sugLines.geometry.attributes.position.array, nodes = this.nodes;
     this.suggest.forEach(([ka, kb], i) => {
       const a = nodes[ka], b = nodes[kb]; if (!a || !b) return;
@@ -351,8 +408,8 @@ export class GraphRenderer {
   }
 
   /* remember / restore the camera around a focus on a node */
-  saveCamera() { if (!this.camBefore) this.camBefore = { ...this.getCamera(), moved: this.userMoved }; }
-  restoreCamera() {
+  saveCamera(): void { if (!this.camBefore) this.camBefore = { ...this.getCamera(), moved: this.userMoved }; }
+  restoreCamera(): boolean {
     if (!this.camBefore) return false;
     const c = this.camBefore; this.camBefore = null;
     this.setCamera(c); this.userMoved = c.moved;
@@ -360,12 +417,12 @@ export class GraphRenderer {
   }
 
   /* external highlight (e.g. hovering a file or folder in the file explorer) */
-  setHighlight(set) {
+  setHighlight(set: Set<number> | null): void {
     this.hl = set || null;
     this.paint(); this.updateLabels(true);
   }
 
-  setPath(path) {
+  setPath(path: number[] | null): void {
     if (!path) { this.pathSet = null; this.pathEdges = null; }
     else {
       this.pathSet = new Set(path);
@@ -375,7 +432,7 @@ export class GraphRenderer {
     this.paint(); this.updateLabels(true);
   }
 
-  syncLines() {
+  syncLines(): void {
     if (!this.lines) return;
     const lp = this.lines.geometry.attributes.position.array, nodes = this.nodes;
     for (let k = 0; k < this.edges.length; k++) {
@@ -387,7 +444,7 @@ export class GraphRenderer {
     if (this.sugLines && (this.sugTick = (this.sugTick || 0) + 1) % 3 === 0) this.syncSuggest();
   }
 
-  setPositions(p) {
+  setPositions(p: ArrayLike<number>): void {
     if (!this.points) return;
     const arr = this.points.geometry.attributes.position.array, nodes = this.nodes;
     const n = Math.min(nodes.length, p.length / 3);
@@ -401,8 +458,8 @@ export class GraphRenderer {
     if (!this.userMoved && this.dragK < 0) this.fit(true);
   }
 
-  paint() {
-    if (!this.points) return;
+  paint(): void {
+    if (!this.points || !this.lines) return;
     const sel = this.sel, path = this.pathSet;
     const nb = path ? null : (sel >= 0 ? new Set([sel, ...this.adj[sel]]) : null);
     const bright = this.dimSet;
@@ -451,7 +508,7 @@ export class GraphRenderer {
     la.color.needsUpdate = true; la.alpha.needsUpdate = true;
   }
 
-  setStyle(upd) {
+  setStyle(upd: Partial<RStyle>): void {
     this.style = Object.assign(this.style, upd);
     const lf = this.style.labelFont || 'ui';
     this.fontStack = LABEL_FONTS[lf] || cssVarFont(lf === 'text' ? '--font-text' : '--font-interface');
@@ -467,9 +524,9 @@ export class GraphRenderer {
     this.refreshColors(); this.updateLabels(true);
   }
 
-  setSelected(k) { this.sel = k; this.paint(); this.updateLabels(true); }
+  setSelected(k: number): void { this.sel = k; this.paint(); this.updateLabels(true); }
 
-  focusNode(k) {
+  focusNode(k: number): void {
     if (k < 0 || !this.nodes[k]) return;
     this.saveCamera();
     const nd = this.nodes[k];
@@ -478,12 +535,12 @@ export class GraphRenderer {
     this.userMoved = true; this.lastInteract = Date.now();
   }
 
-  fit(instant) { this.fitTo(null, instant); this.userMoved = false; }
-  fitDist(r) {
+  fit(instant: boolean): void { this.fitTo(null, instant); this.userMoved = false; }
+  fitDist(r: number): number {
     const v = this.camera.fov * Math.PI / 180, h = 2 * Math.atan(Math.tan(v / 2) * this.camera.aspect);
     return Math.max(60, Math.min(9000, r / Math.sin(Math.min(v, h) / 2) * 1.04));
   }
-  fitTo(list, instant) {
+  fitTo(list: number[] | null, instant: boolean): void {
     const ks = list || this.nodes.map((_, k) => k).filter((k) => !this.isOff(k));
     if (!ks.length) return;
     let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
@@ -504,9 +561,9 @@ export class GraphRenderer {
     if (instant) { this.target.copy(this.targetGoal); this.dist = this.distGoal; }
     if (list) { this.userMoved = true; this.lastInteract = Date.now(); }
   }
-  resetView() { this.userMoved = false; this.fit(false); }
-  zoomBy(f) { this.distGoal = Math.max(30, Math.min(12000, this.distGoal * f)); this.userMoved = true; this.lastInteract = Date.now(); }
-  panBy(dx, dy) {
+  resetView(): void { this.userMoved = false; this.fit(false); }
+  zoomBy(f: number): void { this.distGoal = Math.max(30, Math.min(12000, this.distGoal * f)); this.userMoved = true; this.lastInteract = Date.now(); }
+  panBy(dx: number, dy: number): void {
     this.camera.updateMatrixWorld();
     const f = this.distGoal / (this.canvas.clientHeight || 600) * 1.1;
     const right = new Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
@@ -514,12 +571,12 @@ export class GraphRenderer {
     this.targetGoal.addScaledVector(right, dx * f).addScaledVector(upv, -dy * f);
     this.userMoved = true; this.lastInteract = Date.now();
   }
-  orbitBy(dyaw, dpitch) {
+  orbitBy(dyaw: number, dpitch: number): void {
     this.yaw += dyaw; this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch + dpitch));
     this.userMoved = true; this.lastInteract = Date.now();
   }
 
-  resize() {
+  resize(): void {
     if (!this.active) return;
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
     if (!w || !h) return;
@@ -531,24 +588,24 @@ export class GraphRenderer {
     if (!this.userMoved) this.fit(true);
   }
 
-  project(k) {
+  project(k: number): { x: number; y: number; z: number } {
     const nd = this.nodes[k], v = this.tmpV;
     v.set(nd.x, nd.y, nd.z || 0).applyMatrix4(this.root.matrixWorld).project(this.camera);
     return { x: (v.x + 1) / 2 * this.canvas.clientWidth, y: (1 - v.y) / 2 * this.canvas.clientHeight, z: v.z };
   }
 
-  updateLabels(force) {
+  updateLabels(force: boolean): void {
     const layer = this.labelLayer;
     if (!layer) return;
     if (!force && (this.labelTick++ % 2)) return;
     const nodes = this.nodes, st = this.style, sel = this.sel;
-    let want = [];
+    let want: number[] = [];
     if (this.showLabels && nodes.length) {
       if (this.pathSet) want = [...this.pathSet];
       else if (sel >= 0) want = [sel, ...this.adj[sel].filter((j) => !this.isOff(j))].slice(0, Math.max(28, st.maxLabels));
       else if (this.dimSet) want = [...this.dimSet].sort((a, b) => rk(nodes[b]) - rk(nodes[a])).slice(0, Math.max(40, st.maxLabels));
       else {
-        const idx = [];
+        const idx: number[] = [];
         for (let k = 0; k < nodes.length; k++) if (!this.isOff(k) && rk(nodes[k]) >= st.labelFrom) idx.push(k);
         idx.sort((a, b) => rk(nodes[b]) - rk(nodes[a]));
         want = idx.slice(0, st.maxLabels);
@@ -558,7 +615,7 @@ export class GraphRenderer {
     if (this.flashLabel && performance.now() < this.flashLabel.until && !want.includes(this.flashLabel.k)) want.unshift(this.flashLabel.k);
     if (this.hover >= 0 && !want.includes(this.hover)) want.unshift(this.hover);
     while (this.labelPool.length < want.length) this.labelPool.push(layer.createDiv({ cls: 'cg-label' }));
-    const placed = [];
+    const placed: number[][] = [];
     this.drawn = [];
     for (let i = 0; i < this.labelPool.length; i++) {
       const el = this.labelPool[i];
@@ -593,23 +650,24 @@ export class GraphRenderer {
   }
 
   // ------------------------------------------------------------ input
-  bindInput() {
+  bindInput(): void {
     const canvas = this.canvas;
     const ray = new Raycaster(), plane = new Plane();
-    const ptr = new Map();
-    let gest = null, lastTap = { t: 0, k: -1 }, lastMoved = 0;
-    const rect = (e) => { const b = canvas.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
-    const moveNode = (k, X, Y, Z) => {
+    const ptr = new Map<number, { x: number; y: number }>();
+    let gest: Gesture | null = null, lastTap = { t: 0, k: -1 }, lastMoved = 0;
+    const rect = (e: MouseEvent): [number, number] => { const b = canvas.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
+    const moveNode = (k: number, X: number, Y: number, Z: number) => {
       const nd = this.nodes[k]; nd.x = X; nd.y = Y; nd.z = Z;
+      if (!this.points) return;
       const arr = this.points.geometry.attributes.position.array; arr[3 * k] = X; arr[3 * k + 1] = Y; arr[3 * k + 2] = Z;
       this.points.geometry.attributes.position.needsUpdate = true; this.syncLines();
     };
-    const on = (t, f, o) => { canvas.addEventListener(t, f, o); (this.unbind ||= []).push(() => canvas.removeEventListener(t, f, o)); };
+    const on = <K extends keyof HTMLElementEventMap>(t: K, f: (e: HTMLElementEventMap[K]) => void, o?: AddEventListenerOptions) => { canvas.addEventListener(t, f, o); this.unbind.push(() => canvas.removeEventListener(t, f, o)); };
     on('pointerdown', (e) => {
       canvas.setPointerCapture(e.pointerId);
       const [x, y] = rect(e); ptr.set(e.pointerId, { x, y });
       const under = this.pick(x, y);
-      const m = this.mouse || {};
+      const m: Partial<MouseSettings> = this.mouse || {};
       const shiftAct = m.shift || 'link';
       const linkMode = e.shiftKey && e.button === 0 && shiftAct === 'link' && under >= 0 && !!this.nodes[under].note && !!this.onLink;
       const nodeDrag = !e.shiftKey && e.button === 0 && e.pointerType !== 'touch' ? under : e.pointerType === 'touch' ? under : -1;
@@ -660,7 +718,7 @@ export class GraphRenderer {
       p.x = x; p.y = y;
       this.userMoved = true; this.lastInteract = Date.now();
     });
-    const up = (e) => {
+    const up = (e: PointerEvent) => {
       if (!ptr.has(e.pointerId)) return;
       ptr.delete(e.pointerId);
       if (ptr.size === 0 && gest) {
@@ -698,8 +756,8 @@ export class GraphRenderer {
     }, { passive: false });
   }
 
-  drawLinkLine(k, x, y) {
-    if (!this.linkSvg) {
+  drawLinkLine(k: number, x = 0, y = 0): void {
+    if (!this.linkSvg || !this.linkPath) {
       const ns = 'http://www.w3.org/2000/svg';
       this.linkSvg = document.createElementNS(ns, 'svg'); this.linkSvg.setAttribute('class', 'cg-linkline');
       this.linkPath = document.createElementNS(ns, 'line'); this.linkSvg.appendChild(this.linkPath);
@@ -713,7 +771,7 @@ export class GraphRenderer {
     const t = this.pick(x, y); this.setHover(t >= 0 && t !== k ? t : -1);
   }
 
-  setHover(k) {
+  setHover(k: number): void {
     if (k === this.hover) return;
     this.hover = k;
     this.canvas.toggleClass('is-hovering', k >= 0);
@@ -724,7 +782,7 @@ export class GraphRenderer {
     this.paint(); this.updateLabels(true);
   }
 
-  pick(sx, sy) {
+  pick(sx: number, sy: number): number {
     let best = -1, bd = Infinity;
     for (let k = 0; k < this.nodes.length; k++) {
       if (this.isOff(k)) continue;
@@ -737,7 +795,7 @@ export class GraphRenderer {
   }
 
   // ------------------------------------------------------------ loop
-  frame() {
+  frame(): void {
     if (this.disposed) return;
     this.raf = window.requestAnimationFrame(() => this.frame());
     if (!this.canvas.isConnected || this.canvas.offsetParent === null || document.hidden) return;
@@ -758,31 +816,34 @@ export class GraphRenderer {
   }
 
   // ------------------------------------------------------------ video capture (graph + names + caption)
-  startCapture(caption) {
+  startCapture(caption: (() => string) | null): boolean {
     const W = this.canvas.width, H = this.canvas.height, dpr = W / (this.canvas.clientWidth || W);
-    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const cv = createEl('canvas'); cv.width = W; cv.height = H;
     const types = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
     const type = types.find((x) => window.MediaRecorder && MediaRecorder.isTypeSupported(x));
     if (!type) return false;
     const stream = cv.captureStream(30);
     const mr = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 8000000 });
-    const chunks = [];
+    const chunks: Blob[] = [];
     mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-    this.rec = { cv, ctx: cv.getContext('2d'), mr, chunks, dpr, caption, type };
+    const ctx = cv.getContext('2d');
+    if (!ctx) return false;
+    this.rec = { cv, ctx, mr, chunks, dpr, caption, type };
     mr.start(500);
     return true;
   }
 
-  stopCapture() {
+  stopCapture(): Promise<Blob | null> {
     const rec = this.rec; this.rec = null;
     if (!rec) return Promise.resolve(null);
-    return new Promise((res) => {
+    return new Promise<Blob | null>((res) => {
       rec.mr.onstop = () => res(new Blob(rec.chunks, { type: rec.type.split(';')[0] }));
       rec.mr.stop();
     });
   }
 
-  composite() {
+  composite(): void {
+    if (!this.rec) return;
     const { cv, ctx, dpr } = this.rec;
     ctx.drawImage(this.renderer.domElement, 0, 0, cv.width, cv.height);
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
@@ -811,11 +872,11 @@ export class GraphRenderer {
     }
   }
 
-  dispose() {
+  dispose(): void {
     if (this.rec) { try { this.rec.mr.stop(); } catch { /* ignore */ } this.rec = null; }
     this.disposed = true;
     window.cancelAnimationFrame(this.raf);
-    (this.unbind || []).forEach((f) => f());
+    this.unbind.forEach((f) => f());
     if (!this.active) return;
     for (const o of [this.points, this.lines, this.stars]) if (o) o.geometry.dispose();
     for (const m of [this.nodeMat, this.baseMat, this.lineMat, this.starMat]) m.dispose();

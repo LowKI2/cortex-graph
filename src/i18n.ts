@@ -1,6 +1,7 @@
 import { moment } from 'obsidian';
 
-const EN = {
+type Msg = string | ((...a: (string | number)[]) => string);
+const EN: Record<string, Msg> = {
   viewTitle: 'Cortex graph',
   viewTitleLocal: 'Cortex graph (local)',
   cmdOpen: 'Open graph',
@@ -161,7 +162,7 @@ const EN = {
   sExplorerRows: 'Folders and their notes', sExplorerFolders: 'Folder names only', sExplorerOff: 'Off',
 };
 
-const DE = {
+const DE: Record<string, Msg> = {
   viewTitle: 'Cortex-Graph',
   viewTitleLocal: 'Cortex-Graph (lokal)',
   cmdOpen: 'Graph öffnen',
@@ -321,8 +322,8 @@ const DE = {
   sExplorerRows: 'Ordner und ihre Notizen', sExplorerFolders: 'Nur Ordnernamen', sExplorerOff: 'Aus',
 };
 
-let dict = null;
-export function t(key, ...args) {
+let dict: Record<string, Msg> | null = null;
+export function t(key: string, ...args: (string | number)[]): string {
   if (!dict) {
     let lang = 'en';
     try { lang = String(moment.locale() || 'en'); } catch { /* ignore */ }

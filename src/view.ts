@@ -1,33 +1,75 @@
-import { ItemView, Menu, Modal, Setting, Notice, TFile, prepareFuzzySearch, setIcon, debounce, Platform, moment } from 'obsidian';
-import { GraphRenderer } from './renderer';
-import { buildGraph, assignColors, deepestFolderValue, importance, shortestPath, signature, heatOf, PROBLEM_COLORS } from './model';
+import type { Debouncer, ViewStateResult, WorkspaceLeaf, App } from 'obsidian';
+import type CortexGraphPlugin from './main';
+import type { Edge, GNode, Graph, MouseSettings, Note, StyleSettings, ViewSnapshot } from './types';
+import type { Moment, MomentInput } from 'moment';
+import { ItemView, Menu, Modal, Setting, Notice, TFile, prepareFuzzySearch, setIcon, debounce, Platform, moment as obsidianMoment } from 'obsidian';
+import { GraphRenderer, type RStyle } from './renderer';
+import { buildGraph, assignColors, deepestFolderValue, importance, shortestPath, signature, heatOf, PROBLEM_COLORS, textOf } from './model';
 import { t } from './i18n';
-import SIM_SRC from './sim.worker.js';
+import SIM_SRC from 'cortex-worker:sim';
 
 export const VIEW_TYPE = 'cortex-graph-view';
 
-export const STYLE_KEYS = ['center', 'repel', 'link', 'dist', 'range', 'nodeSize', 'degSize', 'glow', 'line', 'font', 'fontGrow', 'boldFrom', 'labelFrom', 'maxLabels', 'dimOthers', 'shapeSize', 'shapeGroup', 'hubPull', 'nodeBright', 'glowBright', 'shStern', 'shRaute', 'shQuadrat', 'shRing'];
-const SHAPE_KEYS = new Set(['shStern', 'shRaute', 'shQuadrat', 'shRing']);
-const FORCE_KEYS = new Set(['center', 'repel', 'link', 'dist', 'range', 'shapeSize', 'shapeGroup', 'hubPull']);
-const PANEL = [
+export const STYLE_KEYS: (keyof StyleSettings)[] = ['center', 'repel', 'link', 'dist', 'range', 'nodeSize', 'degSize', 'glow', 'line', 'font', 'fontGrow', 'boldFrom', 'labelFrom', 'maxLabels', 'dimOthers', 'shapeSize', 'shapeGroup', 'hubPull', 'nodeBright', 'glowBright', 'shStern', 'shRaute', 'shQuadrat', 'shRing'];
+const SHAPE_KEYS = new Set<string>(['shStern', 'shRaute', 'shQuadrat', 'shRing']);
+const FORCE_KEYS = new Set<string>(['center', 'repel', 'link', 'dist', 'range', 'shapeSize', 'shapeGroup', 'hubPull']);
+type PanelRow = [string] | [keyof StyleSettings, number, number, number];
+const PANEL: PanelRow[] = [
   ['secForces'], ['shapeSize', 0.4, 2.5, 0.05], ['shapeGroup', 0, 1, 0.05], ['hubPull', 0, 1, 0.05], ['center', 0, 5, 0.05], ['range', 60, 2000, 10], ['repel', 0, 20, 0.1], ['link', 0, 1, 0.01], ['dist', 8, 150, 1],
   ['secNodes'], ['nodeSize', 0.3, 3, 0.05], ['dimOthers', 0, 0.6, 0.01], ['degSize', 0, 3, 0.05], ['nodeBright', 0.1, 2, 0.05], ['glow', 0.4, 3, 0.05], ['glowBright', 0, 3, 0.05], ['line', 0.2, 3, 0.05],
   ['secLabels'], ['font', 2, 10, 0.5], ['fontGrow', 0, 3, 0.05], ['labelFrom', 0, 60, 1], ['boldFrom', 1, 60, 1], ['maxLabels', 0, 200, 5],
   ['secShapes'], ['shStern', 0, 25, 0.5], ['shRaute', 0, 25, 0.5], ['shQuadrat', 0, 25, 0.5], ['shRing', 0, 25, 0.5],
 ];
 /* playback speed: vault time per second of playback */
-const TL_RATES = [[1000, 'tlRateSec'], [60000, 'tlRateMin'], [3600000, 'tlRateHour'], [86400000, 'tlRateDay'], [604800000, 'tlRateWeek'], [2592000000, 'tlRateMonth']];
+const TL_RATES: [number, string][] = [[1000, 'tlRateSec'], [60000, 'tlRateMin'], [3600000, 'tlRateHour'], [86400000, 'tlRateDay'], [604800000, 'tlRateWeek'], [2592000000, 'tlRateMonth']];
 /* keyboard + mouse bindings (user-editable in the panel) */
-export const KEY_ACTIONS = ['zin', 'zout', 'up', 'down', 'left', 'right', 'rl', 'rr', 'tu', 'td', 'fit', 'names', 'search'];
-export const DEFAULT_KEYS = { zin: ['+', '='], zout: ['-', ''], up: ['ArrowUp', 'w'], down: ['ArrowDown', 's'], left: ['ArrowLeft', 'a'], right: ['ArrowRight', 'd'],
+export const KEY_ACTIONS: string[] = ['zin', 'zout', 'up', 'down', 'left', 'right', 'rl', 'rr', 'tu', 'td', 'fit', 'names', 'search'];
+export const DEFAULT_KEYS: Record<string, string[]> = { zin: ['+', '='], zout: ['-', ''], up: ['ArrowUp', 'w'], down: ['ArrowDown', 's'], left: ['ArrowLeft', 'a'], right: ['ArrowRight', 'd'],
   rl: ['q', ''], rr: ['e', ''], tu: ['PageUp', 'r'], td: ['PageDown', 'v'], fit: ['0', 'f'], names: ['n', ''], search: ['/', ''] };
-export const DEFAULT_MOUSE = { left: 'pan', right: 'pan', middle: 'rotate', shift: 'link', invert: false, rotSpeed: 1, rotPause: 1 };
-const KEY_NAMES = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', ' ': 'Space', PageUp: 'PgUp', PageDown: 'PgDn', Home: 'Pos1', End: 'Ende', Insert: 'Einfg' };
-const normKey = (k) => (k && k.length === 1 ? k.toLowerCase() : k);
-const keyLabel = (k) => (!k ? '·' : KEY_NAMES[k] || (k.length === 1 ? k.toUpperCase() : k));
+export const DEFAULT_MOUSE: MouseSettings = { left: 'pan', right: 'pan', middle: 'rotate', shift: 'link', invert: false, rotSpeed: 1, rotPause: 1 };
+const KEY_NAMES: Record<string, string> = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', ' ': 'Space', PageUp: 'PgUp', PageDown: 'PgDn', Home: 'Pos1', End: 'Ende', Insert: 'Einfg' };
+const normKey = (k: string): string => (k && k.length === 1 ? k.toLowerCase() : k);
+const keyLabel = (k: string): string => (!k ? '·' : KEY_NAMES[k] || (k.length === 1 ? k.toUpperCase() : k));
+
+interface Suggestion { from: string; to: string; text: string }
+interface Timeline { mode: string; from: number; to: number; pos: number; tag: string; rate: number; playing: boolean; factor?: number; lo?: number; hi?: number }
+interface RangeCtl { rg: HTMLInputElement; out: HTMLElement }
+type SimMsg = { cmd: 'pin'; i: number; x: number; y: number; z: number } | { cmd: 'unpin'; i: number } | { cmd: 'params'; params: ReturnType<CortexGraphView['simParams']> };
+/* obsidian re-exports moment as a namespace; under TS module interop it is not callable without this */
+const moment = obsidianMoment as unknown as (inp?: MomentInput) => Moment;
+const emptyGraph = (): Graph => ({ nodes: [], edges: [], adj: [], idx: new Map<string, number>(), stats: {} });
 
 export class CortexGraphView extends ItemView {
-  constructor(leaf, plugin) {
+  plugin: CortexGraphPlugin;
+  mode = 'global';
+  focusPath: string | null = null;
+  depth: number; activity: boolean; problems = false;
+  G: Graph; sig = '';
+  worker: Worker | null = null; workerUrl: string | null = null;
+  sel = -1; pathFrom = -1; pathPending = false; navMini = false;
+  R: GraphRenderer | null = null;
+  rootEl: HTMLDivElement; canvas: HTMLCanvasElement; labels: HTMLDivElement; anchor: HTMLDivElement;
+  info: HTMLDivElement; hint: HTMLDivElement; legend: HTMLDivElement; tip: HTMLDivElement;
+  requestRebuild: Debouncer<[], void>; requestHeat: Debouncer<[], void>;
+  pinned: string | null = null;
+  groupNames: string[] = []; groupCount = 0;
+  notes: Note[] = []; byPath = new Map<string, Note>();
+  suggestions: Suggestion[] | null = null; sugCount: HTMLElement | null = null; sugToken = 0;
+  sideView = false;
+  reviewKey: string | null = null; reviewFn: ((n: Note) => boolean) | null = null; reviewSet: Set<number> | null = null;
+  timeBar: HTMLDivElement; tl: Timeline; tlOn = false;
+  playBtn: HTMLButtonElement; recBtn: HTMLButtonElement; modeSel: HTMLSelectElement; tagSel: HTMLSelectElement; speedSel: HTMLSelectElement;
+  tlCount: HTMLSpanElement; tlFrom: RangeCtl; tlTo: RangeCtl; tlPos: RangeCtl; playRaf = 0;
+  searchInput: HTMLInputElement; searchList: HTMLDivElement;
+  btnGlobal: HTMLButtonElement; btnLocal: HTMLButtonElement; depthSeg: HTMLDivElement; depthBtns: HTMLButtonElement[];
+  btnLabels: HTMLButtonElement; btnRotate: HTMLButtonElement; btnActivity: HTMLButtonElement; btnReview: HTMLButtonElement;
+  btnViews: HTMLButtonElement; btnTime: HTMLButtonElement; btnProblems: HTMLButtonElement; btnPanel: HTMLButtonElement;
+  sheet: HTMLDivElement; sheetTitle: HTMLDivElement; sheetMeta: HTMLDivElement; sheetBtns: HTMLDivElement; sheetPathBtns: HTMLDivElement; sheetSug: HTMLDivElement;
+  panel: HTMLDivElement; panelTabs: HTMLDivElement; panelBody: HTMLDivElement;
+  capture: (() => void) | null = null;
+  shapeT = 0; forceT = 0;
+
+  constructor(leaf: WorkspaceLeaf, plugin: CortexGraphPlugin) {
     super(leaf);
     this.plugin = plugin;
     this.mode = 'global'; // 'global' | 'local'
@@ -35,26 +77,27 @@ export class CortexGraphView extends ItemView {
     this.depth = plugin.settings.depth;
     this.activity = plugin.settings.activity;
     this.problems = false;
-    this.G = { nodes: [], edges: [], adj: [], idx: new Map(), stats: {} };
+    this.G = emptyGraph();
     this.sig = '';
     this.worker = null; this.workerUrl = null;
     this.sel = -1; this.pathFrom = -1; this.pathPending = false;
     this.navMini = false;
   }
 
-  getViewType() { return VIEW_TYPE; }
-  getDisplayText() { return this.mode === 'local' ? t('viewTitleLocal') : t('viewTitle'); }
-  getIcon() { return 'orbit'; }
+  getViewType(): string { return VIEW_TYPE; }
+  getDisplayText(): string { return this.mode === 'local' ? t('viewTitleLocal') : t('viewTitle'); }
+  getIcon(): string { return 'orbit'; }
 
-  getState() { return Object.assign(super.getState(), { mode: this.mode, depth: this.depth }); }
-  async setState(state, result) {
-    if (state && state.mode) this.mode = state.mode;
-    if (state && state.depth) this.depth = state.depth;
-    if (this.R) { this.updateToolbar(); this.rebuild(true); }
+  getState(): Record<string, unknown> { return Object.assign(super.getState(), { mode: this.mode, depth: this.depth }); }
+  async setState(state: unknown, result: ViewStateResult): Promise<void> {
+    const st = state as { mode?: string; depth?: number } | null;
+    if (st && st.mode) this.mode = st.mode;
+    if (st && st.depth) this.depth = st.depth;
+    if (this.R) { this.updateToolbar(); void this.rebuild(true); }
     return super.setState(state, result);
   }
 
-  async onOpen() {
+  async onOpen(): Promise<void> {
     const root = this.contentEl.createDiv({ cls: 'cg-root' });
     this.rootEl = root;
     if (Platform.isMobile) root.addClass('is-mobile');
@@ -83,26 +126,26 @@ export class CortexGraphView extends ItemView {
     this.R.onHover = (k, e) => this.onHover(k, e);
     this.R.onContext = (k, e) => this.onContext(k, e);
     this.R.onContextEmpty = (e) => this.onContextEmpty(e);
-    this.R.onLink = (a, b) => this.linkNotes(a, b);
+    this.R.onLink = (a, b) => { void this.linkNotes(a, b); };
 
     const ro = new ResizeObserver(() => this.R && this.R.resize());
     ro.observe(root); this.register(() => ro.disconnect());
 
-    this.requestRebuild = debounce(() => this.rebuild(false), 700, true);
+    this.requestRebuild = debounce(() => { void this.rebuild(false); }, 700, true);
     this.registerEvent(this.app.metadataCache.on('resolved', () => this.requestRebuild()));
     this.registerEvent(this.app.vault.on('rename', () => this.requestRebuild()));
     this.registerEvent(this.app.vault.on('delete', () => this.requestRebuild()));
     this.registerEvent(this.app.vault.on('modify', () => { if (this.activity) this.requestHeat(); }));
     this.requestHeat = debounce(() => this.applyHeat(), 1500, true);
-    this.registerEvent(this.app.workspace.on('file-open', () => { if (this.mode === 'local') this.rebuild(false); }));
+    this.registerEvent(this.app.workspace.on('file-open', () => { if (this.mode === 'local') void this.rebuild(false); }));
     this.registerEvent(this.app.workspace.on('css-change', () => this.applyTheme()));
     this.registerInterval(window.setInterval(() => { if (this.activity) this.applyHeat(); }, 60000));
     this.registerDomEvent(root, 'keydown', (e) => this.onKey(e));
     // hovering a file or folder in the file explorer lights up its nodes
     // clicking a folder open keeps it lit until it is closed again
-    let hlPath = null;
+    let hlPath: string | null = null;
     this.pinned = null;
-    const hlFrom = (el) => {
+    const hlFrom = (el: EventTarget | null): Element | null => {
       const it = el instanceof Element ? el.closest('.nav-file-title[data-path], .nav-folder-title[data-path]') : null;
       return it && !this.contentEl.contains(it) ? it : null;
     };
@@ -132,7 +175,7 @@ export class CortexGraphView extends ItemView {
     await this.rebuild(true);
   }
 
-  async onClose() {
+  async onClose(): Promise<void> {
     this.stopPlay();
     if (this.R && this.R.rec) await this.finishRecording();
     this.stopWorker();
@@ -140,8 +183,8 @@ export class CortexGraphView extends ItemView {
     this.R = null;
   }
 
-  styleObj() { const s = this.plugin.settings; const o = { rotate: s.rotate, labelFont: s.labelFont || 'ui', labelStyle: s.labelStyle || 'glow' }; for (const k of STYLE_KEYS) o[k] = s.style[k]; return o; }
-  simParams() {
+  styleObj(): Partial<RStyle> { const s = this.plugin.settings; const o: Partial<RStyle> = { rotate: s.rotate, labelFont: s.labelFont || 'ui', labelStyle: s.labelStyle || 'glow' }; for (const k of STYLE_KEYS) o[k] = s.style[k]; return o; }
+  simParams(): { center: number; repel: number; link: number; dist: number; range: number; shape: string; shapeSize: number; shapeGroup: number; hubPull: number; ngroups: number } {
     const ps = this.plugin.settings, s = ps.style, free = this.mode === 'local' || !!this.focusPath;
     return { center: s.center, repel: s.repel, link: s.link, dist: s.dist, range: s.range,
       shape: free ? 'free' : ps.shape || 'free', shapeSize: s.shapeSize, shapeGroup: s.shapeGroup, hubPull: s.hubPull, ngroups: this.groupCount || 0 };
@@ -149,7 +192,7 @@ export class CortexGraphView extends ItemView {
 
   /* pyramid height per node (0 = apex .. 1 = base): link distance from the most important note, ties by importance;
      spread so that each layer gets as many notes as the pyramid has room for (volume grows with depth^3, area with depth^2) */
-  pyramidLevels(weights, flat) {
+  pyramidLevels(weights: Float32Array, flat: boolean): Float32Array {
     const G = this.G, n = G.nodes.length, lv = new Float32Array(n).fill(-1);
     let root = -1;
     for (let k = 0; k < n; k++) if (weights[k] > 0 && (root < 0 || weights[k] > weights[root])) root = k;
@@ -157,8 +200,8 @@ export class CortexGraphView extends ItemView {
     const depth = new Int32Array(n).fill(-1), q = [root]; depth[root] = 0;
     for (let h = 0; h < q.length; h++) { const a = q[h]; for (const b of G.adj[a]) if (depth[b] < 0) { depth[b] = depth[a] + 1; q.push(b); } }
     let maxD = 0; for (let k = 0; k < n; k++) if (depth[k] > maxD) maxD = depth[k];
-    const ks = []; for (let k = 0; k < n; k++) if (!G.nodes[k].anchor && !G.nodes[k].hidden) ks.push(k);
-    const key = (k) => (depth[k] < 0 ? maxD + 2 : depth[k]) + (1 - weights[k]) * 0.95;
+    const ks: number[] = []; for (let k = 0; k < n; k++) if (!G.nodes[k].anchor && !G.nodes[k].hidden) ks.push(k);
+    const key = (k: number): number => (depth[k] < 0 ? maxD + 2 : depth[k]) + (1 - weights[k]) * 0.95;
     ks.sort((a, b) => key(a) - key(b));
     const p = flat ? 0.5 : 1 / 3;
     ks.forEach((k, i) => { lv[k] = Math.pow((i + 0.5) / ks.length, p); });
@@ -166,9 +209,9 @@ export class CortexGraphView extends ItemView {
   }
 
   /* top-level folder index per node, biggest folder first (for the base form regions) */
-  groupArray() {
-    const nodes = this.G.nodes, top = (nd) => nd.note ? nd.note.folder || '' : nd.anchor && nd.key ? String(nd.key).slice(7).split('/')[0] : '';
-    const cnt = new Map();
+  groupArray(): Int32Array {
+    const nodes = this.G.nodes, top = (nd: GNode): string => nd.note ? nd.note.folder || '' : nd.anchor && nd.key ? String(nd.key).slice(7).split('/')[0] : '';
+    const cnt = new Map<string, number>();
     for (const nd of nodes) { const f = top(nd); if (f && !nd.hidden) cnt.set(f, (cnt.get(f) || 0) + 1); }
     const order = [...cnt.entries()].sort((a, b) => b[1] - a[1]).map((e) => e[0]);
     this.groupNames = order; this.groupCount = order.length;
@@ -178,7 +221,7 @@ export class CortexGraphView extends ItemView {
     return g;
   }
 
-  applyTheme() {
+  applyTheme(): void {
     if (!this.R || !this.R.active) return;
     let bg = '#1e1e1e';
     for (const el of [this.contentEl, this.containerEl, document.body]) {
@@ -192,17 +235,17 @@ export class CortexGraphView extends ItemView {
   }
 
   // ============================================================ data
-  collect() { return this.plugin.collect(); }
-  readGraphCfg() { return this.plugin.readGraphCfg(); }
+  collect(): ReturnType<CortexGraphPlugin['collect']> { return this.plugin.collect(); }
+  readGraphCfg(): ReturnType<CortexGraphPlugin['readGraphCfg']> { return this.plugin.readGraphCfg(); }
 
-  async rebuild(force) {
+  async rebuild(force: boolean): Promise<void> {
     if (!this.R || !this.R.active) return;
     const s = this.plugin.settings;
     const { notes, byPath } = this.collect();
     const cfg = await this.readGraphCfg();
     assignColors(notes, cfg, s.colorBy, s.folderColors);
     this.notes = notes; this.byPath = byPath;
-    let focus = null;
+    let focus: number | null = null;
     if (this.mode === 'local') {
       const f = this.app.workspace.getActiveFile();
       const n = f && byPath.get(f.path);
@@ -211,7 +254,7 @@ export class CortexGraphView extends ItemView {
     } else if (this.focusPath && byPath.has(this.focusPath)) focus = byPath.get(this.focusPath).i;
     const folderLinks = s.folderLinks !== 'off' && focus == null;
     const G = buildGraph(notes, { focus, depth: this.depth, orphans: s.orphans || folderLinks, filter: s.filters && cfg.has ? cfg : null, problems: this.problems, keepHidden: true,
-      exclude: (n) => (s.hiddenFolders || []).some((f) => n.path.startsWith(f + '/')) });
+      exclude: (n: Note) => (s.hiddenFolders || []).some((f) => n.path.startsWith(f + '/')) });
     if (folderLinks) addFolderAnchors(G);
     this.R.anchorLines = s.folderLinks === 'lines';
     const fw = s.folderWeights || {};
@@ -238,10 +281,10 @@ export class CortexGraphView extends ItemView {
     if (this.reviewFn) this.refreshReview();
   }
 
-  async layout(old, focus) {
+  async layout(old: Map<string, GNode>, focus: number | null): Promise<void> {
     this.stopWorker();
     const G = this.G, n = G.nodes.length, flat = this.plugin.settings.layout === 'flat';
-    const saved = focus == null ? await this.plugin.loadPositions(flat) : {};
+    const saved: Record<string, number[]> = focus == null ? await this.plugin.loadPositions(flat) : {};
     const pos = new Float32Array(3 * n);
     let have = 0;
     for (let k = 0; k < n; k++) {
@@ -272,7 +315,7 @@ export class CortexGraphView extends ItemView {
       this.worker = new Worker(this.workerUrl);
     } catch { this.worker = null; return; }
     const w = this.worker;
-    w.onmessage = (ev) => {
+    w.onmessage = (ev: MessageEvent<{ pos: Float32Array; done?: boolean }>) => {
       if (w !== this.worker || !this.R) return;
       this.R.setPositions(ev.data.pos);
       if (ev.data.done && focus == null) this.savePositions();
@@ -287,23 +330,23 @@ export class CortexGraphView extends ItemView {
     w.postMessage({ cmd: 'init', n, dim: flat ? 2 : 3, edges, pos, groups, weights, levels, params: this.simParams(), alpha: alpha0 });
   }
 
-  savePositions() {
-    const s = {};
+  savePositions(): void {
+    const s: Record<string, number[]> = {};
     for (const nd of this.G.nodes) if (!nd.ghost) s[nd.key] = [Math.round(nd.x), Math.round(nd.y), Math.round(nd.z || 0)];
-    this.plugin.savePositions(this.plugin.settings.layout === 'flat', s);
+    void this.plugin.savePositions(this.plugin.settings.layout === 'flat', s);
   }
 
-  stopWorker() {
+  stopWorker(): void {
     if (this.worker) { this.worker.terminate(); this.worker = null; }
     if (this.workerUrl) { URL.revokeObjectURL(this.workerUrl); this.workerUrl = null; }
   }
-  simSend(msg) { if (this.worker) this.worker.postMessage(msg); }
+  simSend(msg: SimMsg): void { if (this.worker) this.worker.postMessage(msg); }
 
-  relayout() {
-    this.plugin.savePositions(this.plugin.settings.layout === 'flat', null).then(() => { this.sig = ''; this.G = { nodes: [], edges: [], adj: [], idx: new Map(), stats: {} }; this.rebuild(true); });
+  relayout(): void {
+    void this.plugin.savePositions(this.plugin.settings.layout === 'flat', null).then(() => { this.sig = ''; this.G = emptyGraph(); return this.rebuild(true); });
   }
 
-  applyHeat() {
+  applyHeat(): void {
     if (!this.R || !this.R.points) return;
     this.applyStale();
     if (!this.activity) { this.R.setHeat(null); return; }
@@ -321,7 +364,7 @@ export class CortexGraphView extends ItemView {
     this.R.setHeat(h);
   }
   /* notes nobody touched for a long time fade out */
-  applyStale() {
+  applyStale(): void {
     const days = this.plugin.settings.staleDays || 0, now = Date.now();
     for (const nd of this.G.nodes) {
       if (!days || !nd.note) { nd.stale = 0; continue; }
@@ -330,16 +373,17 @@ export class CortexGraphView extends ItemView {
     }
   }
 
-  assignShapes(nodes) {
-    const s = this.plugin.settings, st = s.style || {}, MAP = { kreis: 0, circle: 0, ring: 1, stern: 2, star: 2, raute: 3, diamond: 3, quadrat: 4, square: 4 };
+  assignShapes(nodes: GNode[]): void {
+    const s = this.plugin.settings, st: Partial<StyleSettings> = s.style || {}, MAP: Record<string, number> = { kreis: 0, circle: 0, ring: 1, stern: 2, star: 2, raute: 3, diamond: 3, quadrat: 4, square: 4 };
     const def = MAP[s.shapeDefault] ?? 0;
-    const score = (nd) => (nd.rank ?? nd.deg) * (nd.w || 1);
+    const score = (nd: GNode): number => (nd.rank ?? nd.deg) * (nd.w || 1);
     /* automatic tiers by importance: top shStern % stars, next shRaute % diamonds, then squares, then rings */
-    const auto = new Map();
+    const auto = new Map<GNode, number>();
     if (s.hubStars) {
       const ranked = nodes.filter((nd) => nd.note && !nd.hidden && !nd.anchor).sort((a, b) => score(b) - score(a));
       let at = 0;
-      for (const [key, shape] of [['shStern', 2], ['shRaute', 3], ['shQuadrat', 4], ['shRing', 1]]) {
+      const tiers: [keyof StyleSettings, number][] = [['shStern', 2], ['shRaute', 3], ['shQuadrat', 4], ['shRing', 1]];
+      for (const [key, shape] of tiers) {
         const n = Math.round(ranked.length * (Number(st[key]) || 0) / 100);
         for (let i = at; i < Math.min(ranked.length, at + n); i++) if (score(ranked[i]) > 0) auto.set(ranked[i], shape);
         at += n;
@@ -350,31 +394,31 @@ export class CortexGraphView extends ItemView {
       if (!nd.note) { nd.shape = 0; continue; }
       const own = ns[nd.note.path];
       const fmv = nd.note.fm && (nd.note.fm.form ?? nd.note.fm.shape);
-      const fromFm = own ? MAP[own] : fmv != null ? MAP[String(fmv).toLowerCase()] : undefined;
+      const fromFm = own ? MAP[own] : fmv != null ? MAP[textOf(fmv).toLowerCase()] : undefined;
       const fromFolder = deepestFolderValue(s.folderShapes || {}, nd.note.path);
       nd.shape = fromFm ?? (fromFolder != null ? MAP[fromFolder] ?? 0 : auto.get(nd) ?? def);
     }
   }
 
-  reshape() { if (!this.R) return; this.assignShapes(this.G.nodes); this.R.applyShapes(); }
+  reshape(): void { if (!this.R) return; this.assignShapes(this.G.nodes); this.R.applyShapes(); }
 
 
-  applyOverlay() {
+  applyOverlay(): void {
     if (!this.R) return;
     this.legend.empty(); this.legend.toggle(this.problems);
     if (!this.problems) { this.R.setOverlay(null, null); this.R.setSuggestions(null); this.suggestions = null; return; }
-    if (!this.suggestions) this.computeSuggestions();
-    const colors = [], bright = new Set();
-    this.G.nodes.forEach((nd, k) => { if (nd.kind) { colors[k] = PROBLEM_COLORS[nd.kind]; bright.add(k); } else colors[k] = null; });
+    if (!this.suggestions) void this.computeSuggestions();
+    const colors: (string | null)[] = [], bright = new Set<number>();
+    this.G.nodes.forEach((nd, k) => { if (nd.kind) { colors[k] = PROBLEM_COLORS[nd.kind as keyof typeof PROBLEM_COLORS]; bright.add(k); } else colors[k] = null; });
     // edges into unresolved ghosts: keep source visible
     for (const [a, b] of this.G.edges) if (this.G.nodes[b].ghost) bright.add(a);
     if (this.suggestions) for (const x of this.suggestions) { const k = this.G.idx.get(x.from); if (k != null && !colors[k]) { colors[k] = '#ffc04d'; bright.add(k); } }
     this.R.setOverlay(colors, bright);
     for (const kind of ['orphan', 'deadEnd', 'unresolved']) {
       const row = this.legend.createDiv({ cls: 'cg-legend-row' });
-      row.createSpan({ cls: 'cg-dot' }).setCssStyles({ background: PROBLEM_COLORS[kind] });
+      row.createSpan({ cls: 'cg-dot' }).setCssStyles({ background: PROBLEM_COLORS[kind as keyof typeof PROBLEM_COLORS] });
       row.createSpan({ text: t(kind) + ' ' });
-      row.createEl('b', { text: String(this.G.stats[kind] || 0) });
+      row.createEl('b', { text: String((this.G.stats as Partial<Record<string, number>>)[kind] || 0) });
     }
     const row = this.legend.createDiv({ cls: 'cg-legend-row' });
     row.createSpan({ cls: 'cg-dash' });
@@ -382,7 +426,7 @@ export class CortexGraphView extends ItemView {
     this.sugCount = row.createEl('b', { text: this.suggestions ? String(this.suggestions.length) : '…' });
   }
 
-  onActivity(path, op) {
+  onActivity(path: string, op: string): void {
     const k = this.G.idx.get(path);
     if (k == null || !this.R || !this.R.active) return;
     this.R.flash(k, op);
@@ -391,13 +435,13 @@ export class CortexGraphView extends ItemView {
 
   // ============================================================ link suggestions
   /* finds notes that mention the name (or an alias) of another note without linking it */
-  async computeSuggestions() {
+  async computeSuggestions(): Promise<void> {
     const token = (this.sugToken = (this.sugToken || 0) + 1);
     this.suggestions = [];
-    const names = new Map();
+    const names = new Map<string, string>();
     for (const nd of this.G.nodes) {
       if (!nd.note || nd.hidden) continue;
-      const add = (x) => { x = String(x || '').trim(); if (x.length >= 4 && !names.has(x.toLowerCase())) names.set(x.toLowerCase(), nd.note.path); };
+      const add = (v: unknown) => { const x = textOf(v || '').trim(); if (x.length >= 4 && !names.has(x.toLowerCase())) names.set(x.toLowerCase(), nd.note.path); };
       add(nd.note.name);
       const al = nd.note.fm && nd.note.fm.aliases;
       (Array.isArray(al) ? al : al ? [al] : []).forEach(add);
@@ -405,15 +449,15 @@ export class CortexGraphView extends ItemView {
     if (!names.size) return;
     const esc = [...names.keys()].sort((a, b) => b.length - a.length).map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
     const re = new RegExp('(^|[^\\p{L}\\p{N}])(' + esc.join('|') + ')(?![\\p{L}\\p{N}])', 'giu');
-    const out = [];
+    const out: Suggestion[] = [];
     for (const nd of this.G.nodes) {
       if (!nd.note || nd.hidden || !(nd.note.file instanceof TFile)) continue;
       let txt = await this.app.vault.cachedRead(nd.note.file);
       if (token !== this.sugToken) return;
       txt = txt.replace(/^---\n[\s\S]*?\n---/, '').replace(/```[\s\S]*?```/g, ' ').replace(/`[^`\n]*`/g, ' ')
         .replace(/!?\[\[[^\]]*\]\]/g, ' ').replace(/\[[^\]]*\]\([^)]*\)/g, ' ').replace(/https?:\/\/\S+/g, ' ');
-      const seen = new Set();
-      let m;
+      const seen = new Set<string>();
+      let m: RegExpExecArray | null;
       re.lastIndex = 0;
       while ((m = re.exec(txt))) {
         const target = names.get(m[2].toLowerCase());
@@ -426,11 +470,11 @@ export class CortexGraphView extends ItemView {
     }
     if (token !== this.sugToken || !this.problems) return;
     // drop names that appear unlinked almost everywhere (person names, generic words) and pairs already close in the graph
-    const per = new Map();
+    const per = new Map<string, number>();
     for (const x of out) per.set(x.to, (per.get(x.to) || 0) + 1);
     const real = this.G.nodes.filter((nd) => nd.note && !nd.hidden).length;
     const limit = Math.max(8, Math.round(real * 0.03));
-    const near = (a, b) => {
+    const near = (a: string, b: string): boolean => {
       const na = this.byPath.get(a), nb = this.byPath.get(b);
       if (!na || !nb) return false;
       for (const j of [...na.out, ...na.back]) { const m = this.notes[j]; if (m.out.has(nb.i) || m.back.has(nb.i)) return true; }
@@ -444,17 +488,17 @@ export class CortexGraphView extends ItemView {
   }
 
   /* dashed lines only for the selected note (all at once would be unreadable) */
-  showSuggestLines() {
+  showSuggestLines(): void {
     if (!this.R) return;
     const nd = this.sel >= 0 ? this.G.nodes[this.sel] : null;
     if (!this.problems || !this.suggestions || !nd || !nd.note) { this.R.setSuggestions(null); return; }
     const p = nd.note.path;
     this.R.setSuggestions(this.suggestions.filter((x) => x.from === p || x.to === p)
-      .map((x) => [this.G.idx.get(x.from), this.G.idx.get(x.to)]).filter(([a, b]) => a != null && b != null));
+      .map((x): Edge => [this.G.idx.get(x.from), this.G.idx.get(x.to)]).filter(([a, b]) => a != null && b != null));
   }
 
   /* turns the first plain mention into a link */
-  async applySuggestion(sg) {
+  async applySuggestion(sg: Suggestion): Promise<void> {
     const f = this.app.vault.getAbstractFileByPath(sg.from), tf = this.app.vault.getAbstractFileByPath(sg.to);
     if (!(f instanceof TFile) || !(tf instanceof TFile)) return;
     const lt = this.app.metadataCache.fileToLinktext(tf, f.path, true);
@@ -463,7 +507,7 @@ export class CortexGraphView extends ItemView {
     await this.app.vault.process(f, (txt) => {
       const esc = sg.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const re = new RegExp('(\\[\\[[^\\]]*\\]\\]|```[\\s\\S]*?```|`[^`\\n]*`)|(^|[^\\p{L}\\p{N}])(' + esc + ')(?![\\p{L}\\p{N}])', 'giu');
-      return txt.replace(re, (all, skip, pre, hit) => {
+      return txt.replace(re, (all: string, skip: string | undefined, pre: string, hit: string) => {
         if (skip || done) return all;
         done = true;
         return pre + (hit.toLowerCase() === lt.toLowerCase() ? '[[' + hit + ']]' : '[[' + lt + '|' + hit + ']]');
@@ -473,7 +517,7 @@ export class CortexGraphView extends ItemView {
   }
 
   // ============================================================ create + link notes
-  async linkNotes(a, b) {
+  async linkNotes(a: number, b: number): Promise<void> {
     const na = this.noteOf(a), nb = this.noteOf(b);
     if (!na || !nb) return;
     const lt = this.app.metadataCache.fileToLinktext(nb.file, na.path, true);
@@ -482,7 +526,7 @@ export class CortexGraphView extends ItemView {
     new Notice(t('linkDone', na.name, nb.name));
   }
 
-  async createNote(near) {
+  async createNote(near: GNode | null): Promise<void> {
     const base = near && near.note ? near.note.file.parent : this.app.fileManager.getNewFileParent('');
     new NameModal(this.app, near ? t('newLinked', near.label) : t('newNote'), '', async (name) => {
       const folder = base && base.path !== '/' ? base.path + '/' : '';
@@ -495,53 +539,53 @@ export class CortexGraphView extends ItemView {
     }).open();
   }
 
-  onContextEmpty(e) {
+  onContextEmpty(e: MouseEvent): void {
     const menu = new Menu();
-    menu.addItem((i) => i.setTitle(t('newNote')).setIcon('file-plus').onClick(() => this.createNote(null)));
+    menu.addItem((i) => i.setTitle(t('newNote')).setIcon('file-plus').onClick(() => { void this.createNote(null); }));
     if (this.R.camBefore) menu.addItem((i) => i.setTitle(t('camBack')).setIcon('undo-2').onClick(() => this.R.restoreCamera()));
     menu.addItem((i) => i.setTitle(t('fit')).setIcon('maximize').onClick(() => this.R.resetView()));
     menu.showAtMouseEvent(e);
   }
 
   // ============================================================ session review
-  reviewMenu(e) {
+  reviewMenu(e: MouseEvent): void {
     const menu = new Menu(), day = 86400000, now = Date.now();
     const start = moment().startOf('day').valueOf();
-    const opts = [['reviewToday', (n) => n.mtime >= start], ['reviewSession', (n) => n.mtime >= this.plugin.startedAt],
+    const opts: [string, (n: Note) => boolean][] = [['reviewToday', (n) => n.mtime >= start], ['reviewSession', (n) => n.mtime >= this.plugin.startedAt],
       ['reviewWeek', (n) => n.mtime >= now - 7 * day], ['reviewClaude', (n) => this.plugin.externalWrites.has(n.path)]];
     for (const [key, fn] of opts) menu.addItem((i) => i.setTitle(t(key)).setChecked(this.reviewKey === key).onClick(() => this.setReview(key, fn)));
     if (this.reviewKey) { menu.addSeparator(); menu.addItem((i) => i.setTitle(t('reviewOff')).setIcon('x').onClick(() => this.setReview(null))); }
     menu.showAtMouseEvent(e);
   }
 
-  setReview(key, fn) {
+  setReview(key: string | null, fn?: ((n: Note) => boolean) | null): void {
     this.reviewKey = key; this.reviewFn = fn || null;
     this.refreshReview();
     this.updateToolbar();
   }
 
-  refreshReview() {
+  refreshReview(): void {
     if (!this.reviewFn) { this.reviewSet = null; this.R.setHighlight(null); this.hint.toggle(false); return; }
-    const set = new Set();
+    const set = new Set<number>();
     this.G.nodes.forEach((nd, k) => { if (nd.note && this.reviewFn(nd.note)) set.add(k); });
     this.reviewSet = set;
     this.R.setHighlight(set);
     this.hint.setText(t('reviewCount', set.size)); this.hint.toggle(set.size === 0);
-    if (set.size) this.R.fitTo([...set]);
+    if (set.size) this.R.fitTo([...set], false);
   }
 
-  updateInfo() {
+  updateInfo(): void {
     const G = this.G;
-    const vis = (nd) => !nd.ghost && !nd.hidden && !nd.anchor;
+    const vis = (nd: GNode): boolean => !nd.ghost && !nd.hidden && !nd.anchor;
     const real = G.nodes.filter(vis).length;
     const links = G.edges.filter(([a, b]) => vis(G.nodes[a]) && vis(G.nodes[b])).length;
     this.info.setText(real + ' ' + t('notes') + ' · ' + links + ' ' + t('links'));
   }
 
-  highlightPath(path, folder) {
+  highlightPath(path: string | null, folder?: boolean): void {
     if (!this.R || !this.R.active) return;
     if (!path) { this.R.setHighlight(this.reviewSet || null); this.R.setGalaxy(null); this.hint.toggle(false); return; }
-    const set = new Set();
+    const set = new Set<number>();
     if (folder) { const pre = path === '/' ? '' : path + '/'; this.G.nodes.forEach((nd, k) => { if (nd.note && nd.note.path.startsWith(pre)) set.add(k); }); }
     else { const k = this.G.idx.get(path); if (k != null) set.add(k); }
     this.R.setHighlight(set);
@@ -557,9 +601,9 @@ export class CortexGraphView extends ItemView {
   }
 
   // ============================================================ interaction
-  noteOf(k) { const nd = this.G.nodes[k]; return nd && nd.note; }
+  noteOf(k: number): Note | null { const nd = this.G.nodes[k]; return nd && nd.note; }
 
-  async openNote(k, newTab) {
+  async openNote(k: number, newTab: boolean): Promise<void> {
     const n = this.noteOf(k); if (!n) return;
     const leaf = this.app.workspace.getLeaf(newTab ? 'tab' : false);
     // never replace the graph itself
@@ -567,15 +611,15 @@ export class CortexGraphView extends ItemView {
     await target.openFile(n.file);
   }
 
-  onTap(k, dbl, e) {
+  onTap(k: number, dbl: boolean, e: PointerEvent | null): void {
     if (k < 0) { if (this.pathPending) return; this.select(-1); this.R.restoreCamera(); return; }
     if (this.pathPending) { this.finishPath(k); return; }
     const mod = e && (e.ctrlKey || e.metaKey);
-    if (this.noteOf(k) && (mod || dbl || this.plugin.settings.clickOpens)) { this.openNote(k, mod); if (!this.plugin.settings.clickOpens) return; }
+    if (this.noteOf(k) && (mod || dbl || this.plugin.settings.clickOpens)) { void this.openNote(k, !!mod); if (!this.plugin.settings.clickOpens) return; }
     this.select(k, true);
   }
 
-  select(k, fly) {
+  select(k: number, fly = false): void {
     this.sel = k;
     if (this.R.pathSet) this.R.setPath(null);
     this.R.setSelected(k);
@@ -585,7 +629,7 @@ export class CortexGraphView extends ItemView {
     this.showSheet(k);
   }
 
-  onHover(k, e) {
+  onHover(k: number, e: PointerEvent): void {
     this.anchor.toggleClass('is-active', k >= 0);
     this.showTip(k, e);
     const n = k >= 0 ? this.noteOf(k) : null;
@@ -593,26 +637,26 @@ export class CortexGraphView extends ItemView {
     this.app.workspace.trigger('hover-link', { event: e, source: VIEW_TYPE, hoverParent: this, targetEl: this.anchor, linktext: n.path });
   }
 
-  onContext(k, e) {
+  onContext(k: number, e: MouseEvent): void {
     const n = this.noteOf(k);
     const menu = new Menu();
     if (n) {
-      menu.addItem((i) => i.setTitle(t('open')).setIcon('file').onClick(() => this.openNote(k, false)));
-      menu.addItem((i) => i.setTitle(t('openTab')).setIcon('file-plus').onClick(() => this.openNote(k, true)));
+      menu.addItem((i) => i.setTitle(t('open')).setIcon('file').onClick(() => { void this.openNote(k, false); }));
+      menu.addItem((i) => i.setTitle(t('openTab')).setIcon('file-plus').onClick(() => { void this.openNote(k, true); }));
       menu.addItem((i) => i.setTitle(t('focus')).setIcon('git-fork').onClick(() => this.focusOn(n.path)));
-      menu.addItem((i) => i.setTitle(t('newLinkedShort')).setIcon('file-plus-2').onClick(() => this.createNote(this.G.nodes[k])));
+      menu.addItem((i) => i.setTitle(t('newLinkedShort')).setIcon('file-plus-2').onClick(() => { void this.createNote(this.G.nodes[k]); }));
     }
     menu.addItem((i) => i.setTitle(t('pathFrom')).setIcon('route').onClick(() => this.startPath(k)));
     if (n) { menu.addSeparator(); this.app.workspace.trigger('file-menu', menu, n.file, 'cortex-graph-context-menu', this.leaf); }
     menu.showAtMouseEvent(e);
   }
 
-  focusOn(path) {
+  focusOn(path: string): void {
     this.focusPath = path; this.mode = 'global';
-    this.updateToolbar(); this.rebuild(true);
+    this.updateToolbar(); void this.rebuild(true);
   }
 
-  startPath(k) {
+  startPath(k: number): void {
     this.pathFrom = k; this.pathPending = true;
     this.R.setPath(null); this.R.setSelected(k);
     this.sheetTitle.setText(this.G.nodes[k].label);
@@ -621,13 +665,13 @@ export class CortexGraphView extends ItemView {
     this.sheet.toggle(true); this.syncSheetSpace();
   }
 
-  finishPath(k) {
+  finishPath(k: number): void {
     this.pathPending = false;
     const p = shortestPath(this.G.adj, this.pathFrom, k);
     this.sel = -1; this.R.setSelected(-1);
     if (!p) { new Notice(t('pathNone')); this.hideSheet(); return; }
     this.R.setPath(p);
-    this.R.fitTo(p);
+    this.R.fitTo(p, false);
     this.sheetTitle.setText(this.G.nodes[this.pathFrom].label + ' → ' + this.G.nodes[k].label);
     this.sheetMeta.setText(t('pathFound', p.length - 1) + ': ' + p.map((j) => this.G.nodes[j].label).join(' › '));
     this.sheetBtns.toggle(false); this.sheetPathBtns.toggle(true);
@@ -635,19 +679,19 @@ export class CortexGraphView extends ItemView {
   }
 
   /* path from the command palette (paths of notes) */
-  showPathBetween(pa, pb) {
+  showPathBetween(pa: string, pb: string): void {
     const a = this.G.idx.get(pa), b = this.G.idx.get(pb);
     if (a == null || b == null) { new Notice(t('notInGraph')); return; }
     this.pathFrom = a; this.finishPath(b);
   }
 
-  flyTo(path) {
+  flyTo(path: string): void {
     const k = this.G.idx.get(path);
     if (k == null || this.G.nodes[k].hidden || this.G.nodes[k].anchor) { new Notice(t('notInGraph')); return; }
     this.select(k, false); this.R.focusNode(k);
   }
 
-  onKey(e) {
+  onKey(e: KeyboardEvent): void {
     if (e.target instanceof HTMLInputElement) return;
     if (e.key === 'Escape') { if (this.pathPending || this.R.pathSet) { this.pathPending = false; this.R.setPath(null); this.hideSheet(); } else this.select(-1); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -660,7 +704,7 @@ export class CortexGraphView extends ItemView {
     this.navStep(a, a === 'fit' ? 1 : 6);
   }
 
-  showTip(k, e) {
+  showTip(k: number, e: PointerEvent): void {
     const tip = this.tip;
     if (k < 0 || !this.G.nodes[k]) { tip.toggle(false); return; }
     const nd = this.G.nodes[k], n = nd.note;
@@ -684,13 +728,13 @@ export class CortexGraphView extends ItemView {
   }
 
   // ============================================================ time lapse + tag filter
-  buildTimeline(root) {
+  buildTimeline(root: HTMLElement): void {
     const bar = root.createDiv({ cls: 'cg-time' }); bar.toggle(false);
     this.timeBar = bar;
     this.tl = { mode: 'ctime', from: 0, to: 1, pos: 1, tag: '', rate: 3600000, playing: false };
     const row1 = bar.createDiv({ cls: 'cg-time-row' });
     this.playBtn = row1.createEl('button', { cls: 'cg-time-play clickable-icon', attr: { 'aria-label': t('tlPlay') } }); setIcon(this.playBtn, 'play');
-    this.playBtn.onclick = () => (this.tl.playing ? this.stopPlay() : this.startPlay());
+    this.playBtn.onclick = () => { if (this.tl.playing) this.stopPlay(); else this.startPlay(); };
     const mode = row1.createEl('select', { cls: 'dropdown' });
     this.modeSel = mode;
     mode.onchange = () => { this.tl.mode = mode.value; this.initRange(); this.applyMask(); };
@@ -705,15 +749,15 @@ export class CortexGraphView extends ItemView {
     mul.value = '1'; this.tl.factor = 1;
     mul.onchange = () => { this.tl.factor = Number(mul.value); this.restartIfPlaying(); };
     this.recBtn = row1.createEl('button', { cls: 'cg-time-rec clickable-icon', attr: { 'aria-label': t('tlRecord') } }); setIcon(this.recBtn, 'circle');
-    this.recBtn.onclick = () => (this.R.rec ? this.finishRecording() : this.startRecording());
+    this.recBtn.onclick = () => { if (this.R.rec) void this.finishRecording(); else this.startRecording(); };
     this.tlCount = row1.createSpan({ cls: 'cg-time-count' });
     const x = bar.createEl('button', { cls: 'clickable-icon cg-time-close', attr: { 'aria-label': t('close') } }); setIcon(x, 'x');
-    x.onclick = () => { if (this.R.rec) this.finishRecording(); this.toggleTimeline(false); };
+    x.onclick = () => { if (this.R.rec) void this.finishRecording(); this.toggleTimeline(false); };
     // left: range (From / To), right: timeline with the playhead
     const row2 = bar.createDiv({ cls: 'cg-time-row cg-time-row2' });
     const left = row2.createDiv({ cls: 'cg-time-left' });
     const right = row2.createDiv({ cls: 'cg-time-right' });
-    const mk = (parent, lbl, cls) => {
+    const mk = (parent: HTMLElement, lbl: string, cls?: string): RangeCtl => {
       const w = parent.createDiv({ cls: 'cg-time-range' + (cls ? ' ' + cls : '') });
       const top = w.createDiv({ cls: 'cg-time-label' }); top.createSpan({ text: lbl }); const out = top.createEl('b');
       const rg = w.createEl('input', { type: 'range', attr: { min: 0, max: 1000, step: 1 } });
@@ -735,12 +779,12 @@ export class CortexGraphView extends ItemView {
   }
 
   /* timeline slider covers From..To */
-  syncPos() {
+  syncPos(): void {
     const tl = this.tl, span = Math.max(1e-6, tl.to - tl.from);
     this.tlPos.rg.value = String(Math.round((tl.pos - tl.from) / span * 1000));
   }
 
-  toggleTimeline(on) {
+  toggleTimeline(on?: boolean): void {
     this.tlOn = on == null ? !this.tlOn : on;
     this.timeBar.toggle(this.tlOn);
     this.rootEl.toggleClass('has-time', this.tlOn);
@@ -748,24 +792,24 @@ export class CortexGraphView extends ItemView {
     this.applyMask(); this.updateToolbar();
   }
 
-  fillModes() {
+  fillModes(): void {
     const sel = this.modeSel, cur = this.tl.mode;
     sel.empty();
     sel.createEl('option', { value: 'ctime', text: t('tlCreated') }); sel.createEl('option', { value: 'mtime', text: t('tlModified') });
-    const keys = new Map();
-    for (const nd of this.G.nodes) if (nd.note && !nd.hidden) for (const k in nd.note.fm) if (/^\d{4}-\d{2}-\d{2}/.test(String(nd.note.fm[k]))) keys.set(k, (keys.get(k) || 0) + 1);
+    const keys = new Map<string, number>();
+    for (const nd of this.G.nodes) if (nd.note && !nd.hidden) for (const k in nd.note.fm) if (/^\d{4}-\d{2}-\d{2}/.test(textOf(nd.note.fm[k]))) keys.set(k, (keys.get(k) || 0) + 1);
     for (const [k] of [...keys.entries()].sort((a, b) => b[1] - a[1])) sel.createEl('option', { value: 'fm:' + k, text: t('tlProperty', k) });
     sel.value = [...sel.options].some((o) => o.value === cur) ? cur : 'ctime'; this.tl.mode = sel.value;
   }
 
-  timeOf(n) {
+  timeOf(n: Note): number {
     const m = this.tl.mode;
-    if (m.startsWith('fm:')) { const v = Date.parse(String(n.fm[m.slice(3)] || '')); return isNaN(v) ? NaN : v; }
-    return n[m];
+    if (m.startsWith('fm:')) { const v = Date.parse(textOf(n.fm[m.slice(3)] || '')); return isNaN(v) ? NaN : v; }
+    return n[m as 'ctime' | 'mtime'];
   }
 
-  fillTags() {
-    const cnt = new Map();
+  fillTags(): void {
+    const cnt = new Map<string, number>();
     for (const nd of this.G.nodes) if (nd.note && !nd.hidden) for (const x of nd.note.tags) cnt.set(x, (cnt.get(x) || 0) + 1);
     const sel = this.tagSel, cur = this.tl.tag;
     sel.empty();
@@ -774,7 +818,7 @@ export class CortexGraphView extends ItemView {
     sel.value = cnt.has(cur) ? cur : ''; this.tl.tag = sel.value;
   }
 
-  initRange() {
+  initRange(): void {
     let lo = Infinity, hi = -Infinity;
     for (const nd of this.G.nodes) if (nd.note && !nd.hidden) { const v = this.timeOf(nd.note); if (isNaN(v)) continue; if (v < lo) lo = v; if (v > hi) hi = v; }
     if (!isFinite(lo)) { lo = 0; hi = 1; }
@@ -788,13 +832,13 @@ export class CortexGraphView extends ItemView {
     this.tl.rate = best; this.speedSel.value = String(best);
   }
 
-  timeAt(f) { return this.tl.lo + (this.tl.hi - this.tl.lo) * f; }
+  timeAt(f: number): number { return this.tl.lo + (this.tl.hi - this.tl.lo) * f; }
 
-  applyMask() {
+  applyMask(): void {
     if (!this.R || !this.R.active || !this.timeBar) return;
     if (!this.tlOn) { this.R.fresh = null; this.R.setMask(null); return; }
     const tl = this.tl, a = this.timeAt(tl.from), b = this.timeAt(tl.pos), tag = tl.tag;
-    const set = new Set(), fresh = new Set(), freshFrom = b - (tl.hi - tl.lo) * 0.03;
+    const set = new Set<number>(), fresh = new Set<number>(), freshFrom = b - (tl.hi - tl.lo) * 0.03;
     this.G.nodes.forEach((nd, k) => {
       const n = nd.note; if (!n) return;
       const v = this.timeOf(n);
@@ -806,39 +850,39 @@ export class CortexGraphView extends ItemView {
     this.G.nodes.forEach((nd, k) => { if (nd.ghost && this.G.adj[k].some((j) => set.has(j))) set.add(k); });
     this.R.fresh = fresh.size ? fresh : null;
     this.R.setMask(set);
-    const fmt = (v) => moment(v).format(tl.hi - tl.lo < 4 * 86400000 ? 'DD.MM. HH:mm' : 'DD.MM.YYYY');
+    const fmt = (v: number) => moment(v).format(tl.hi - tl.lo < 4 * 86400000 ? 'DD.MM. HH:mm' : 'DD.MM.YYYY');
     this.tlFrom.out.setText(fmt(a)); this.tlTo.out.setText(fmt(this.timeAt(tl.to))); this.tlPos.out.setText(fmt(b));
     this.tlCount.setText(set.size + ' ' + t('notes'));
   }
 
   /* changing speed while playing starts the playback over from "From" */
-  restartIfPlaying() {
+  restartIfPlaying(): void {
     const tl = this.tl;
     if (!tl.playing) return;
     tl.pos = tl.from; this.syncPos();
     this.applyMask();
   }
 
-  startPlay() {
+  startPlay(): void {
     const tl = this.tl;
     if (tl.pos >= tl.to - 0.001) tl.pos = tl.from;
     tl.playing = true; setIcon(this.playBtn, 'pause');
     let last = performance.now();
-    const step = (ts) => {
+    const step = (ts: number) => {
       if (!tl.playing) return;
       const dt = (ts - last) / 1000; last = ts;
       tl.pos = Math.min(tl.to, tl.pos + dt * tl.rate * (tl.factor || 1) / Math.max(1, tl.hi - tl.lo));
       this.syncPos();
       this.applyMask();
-      if (tl.pos >= tl.to) { this.stopPlay(); if (this.R.rec) window.setTimeout(() => this.finishRecording(), 1500); return; }
+      if (tl.pos >= tl.to) { this.stopPlay(); if (this.R.rec) window.setTimeout(() => { void this.finishRecording(); }, 1500); return; }
       this.playRaf = window.requestAnimationFrame(step);
     };
     this.playRaf = window.requestAnimationFrame(step);
   }
 
-  startRecording() {
+  startRecording(): void {
     const tl = this.tl;
-    const fmt = (v) => moment(v).format(tl.hi - tl.lo < 4 * 86400000 ? 'DD.MM.YYYY HH:mm' : 'DD.MM.YYYY');
+    const fmt = (v: number) => moment(v).format(tl.hi - tl.lo < 4 * 86400000 ? 'DD.MM.YYYY HH:mm' : 'DD.MM.YYYY');
     const ok = this.R.startCapture(() => fmt(this.timeAt(tl.pos)) + (tl.tag ? '   #' + tl.tag : '') + '   ' + (this.R.mask ? this.R.mask.size : '') + ' ' + t('notes'));
     if (!ok) { new Notice(t('tlRecNo')); return; }
     this.recBtn.addClass('is-recording'); setIcon(this.recBtn, 'square');
@@ -847,7 +891,7 @@ export class CortexGraphView extends ItemView {
     window.setTimeout(() => this.startPlay(), 600);
   }
 
-  async finishRecording() {
+  async finishRecording(): Promise<void> {
     if (!this.R.rec) return;
     this.stopPlay();
     this.recBtn.removeClass('is-recording'); setIcon(this.recBtn, 'circle');
@@ -859,17 +903,17 @@ export class CortexGraphView extends ItemView {
     new RecordingModal(this, blob, name).open();
   }
 
-  async saveToVault(blob, name, open) {
+  async saveToVault(blob: Blob, name: string, open: boolean): Promise<TFile> {
     let path = name;
     try { path = await this.app.fileManager.getAvailablePathForAttachment(name); } catch { /* use vault root */ }
     const f = await this.app.vault.createBinary(path, await blob.arrayBuffer());
     new Notice(t('tlRecSaved', f.path));
-    if (open) this.app.workspace.getLeaf('tab').openFile(f);
+    if (open) void this.app.workspace.getLeaf('tab').openFile(f);
     return f;
   }
 
 
-  stopPlay() {
+  stopPlay(): void {
     if (!this.tl) return;
     this.tl.playing = false; window.cancelAnimationFrame(this.playRaf);
     if (this.playBtn) setIcon(this.playBtn, 'play');
@@ -877,7 +921,7 @@ export class CortexGraphView extends ItemView {
   }
 
   // ============================================================ saved views
-  captureView() {
+  captureView(): ViewSnapshot {
     return {
       cam: this.R.getCamera(), mode: this.mode, focusPath: this.focusPath, depth: this.depth, problems: this.problems,
       activity: this.activity, labels: this.plugin.settings.labels, pinned: this.pinned,
@@ -885,7 +929,7 @@ export class CortexGraphView extends ItemView {
     };
   }
 
-  async restoreView(v) {
+  async restoreView(v: ViewSnapshot): Promise<void> {
     this.stopPlay();
     this.mode = v.mode || 'global'; this.focusPath = v.focusPath || null; this.depth = v.depth || 1;
     this.problems = !!v.problems; this.activity = v.activity !== false;
@@ -908,10 +952,10 @@ export class CortexGraphView extends ItemView {
     this.updateToolbar();
   }
 
-  viewsMenu(e) {
+  viewsMenu(e: MouseEvent): void {
     const views = this.plugin.settings.views || (this.plugin.settings.views = []);
     const menu = new Menu();
-    for (const v of views) menu.addItem((i) => i.setTitle(v.name).setIcon('bookmark').onClick(() => this.restoreView(v.state)));
+    for (const v of views) menu.addItem((i) => i.setTitle(v.name).setIcon('bookmark').onClick(() => { void this.restoreView(v.state); }));
     if (views.length) menu.addSeparator();
     menu.addItem((i) => i.setTitle(t('viewSave')).setIcon('bookmark-plus').onClick(() => {
       new NameModal(this.app, t('viewSave'), '', async (name) => {
@@ -928,12 +972,12 @@ export class CortexGraphView extends ItemView {
   }
 
   // ============================================================ UI parts
-  buildToolbar(root) {
+  buildToolbar(root: HTMLElement): void {
     const bar = root.createDiv({ cls: 'cg-bar' });
     const sw = bar.createDiv({ cls: 'cg-search' });
     this.searchInput = sw.createEl('input', { type: 'search', placeholder: t('search') });
     this.searchList = sw.createDiv({ cls: 'cg-suggest' }); this.searchList.toggle(false);
-    let hits = [], hi = 0;
+    let hits: { n: Note; s: number }[] = [], hi = 0;
     const render = () => {
       this.searchList.empty();
       hits.forEach((h, i) => {
@@ -945,7 +989,7 @@ export class CortexGraphView extends ItemView {
       });
       this.searchList.toggle(hits.length > 0);
     };
-    const go = (i) => { const h = hits[i]; if (!h) return; this.searchInput.value = ''; hits = []; render(); this.searchInput.blur(); this.flyTo(h.n.path); };
+    const go = (i: number) => { const h = hits[i]; if (!h) return; this.searchInput.value = ''; hits = []; render(); this.searchInput.blur(); this.flyTo(h.n.path); };
     this.registerDomEvent(this.searchInput, 'input', () => {
       const q = this.searchInput.value.trim();
       hits = [];
@@ -967,18 +1011,18 @@ export class CortexGraphView extends ItemView {
     const seg = bar.createDiv({ cls: 'cg-seg' });
     this.btnGlobal = seg.createEl('button', { text: t('global') });
     this.btnLocal = seg.createEl('button', { text: t('local') });
-    this.btnGlobal.onclick = () => { this.mode = 'global'; this.focusPath = null; this.updateToolbar(); this.rebuild(true); this.app.workspace.requestSaveLayout(); };
-    this.btnLocal.onclick = () => { this.mode = 'local'; this.focusPath = null; this.updateToolbar(); this.rebuild(true); this.app.workspace.requestSaveLayout(); };
+    this.btnGlobal.onclick = () => { this.mode = 'global'; this.focusPath = null; this.updateToolbar(); void this.rebuild(true); this.app.workspace.requestSaveLayout(); };
+    this.btnLocal.onclick = () => { this.mode = 'local'; this.focusPath = null; this.updateToolbar(); void this.rebuild(true); this.app.workspace.requestSaveLayout(); };
     this.depthSeg = bar.createDiv({ cls: 'cg-seg cg-depth' });
     this.depthBtns = [1, 2, 3].map((d) => {
       const b = this.depthSeg.createEl('button', { text: String(d) });
-      b.onclick = () => { this.depth = d; this.updateToolbar(); this.rebuild(true); this.app.workspace.requestSaveLayout(); };
+      b.onclick = () => { this.depth = d; this.updateToolbar(); void this.rebuild(true); this.app.workspace.requestSaveLayout(); };
       return b;
     });
-    const tb = (icon, label, fn) => { const b = bar.createEl('button', { cls: 'cg-tool clickable-icon', attr: { 'aria-label': label } }); setIcon(b, icon); b.onclick = fn; return b; };
-    this.btnLabels = tb('type', t('sLabels'), () => { this.plugin.settings.labels = !this.plugin.settings.labels; this.plugin.saveSettings(); this.plugin.refreshViews('style'); this.plugin.views().forEach((v) => v.updateToolbar()); });
-    this.btnRotate = tb('rotate-3d', t('rotate'), () => { this.plugin.settings.rotate = !this.plugin.settings.rotate; this.plugin.saveSettings(); this.plugin.refreshViews('style'); });
-    this.btnActivity = tb('flame', t('activity'), () => { this.activity = !this.activity; this.plugin.settings.activity = this.activity; this.plugin.saveSettings(); this.updateToolbar(); this.applyHeat(); });
+    const tb = (icon: string, label: string, fn: (e: MouseEvent) => unknown): HTMLButtonElement => { const b = bar.createEl('button', { cls: 'cg-tool clickable-icon', attr: { 'aria-label': label } }); setIcon(b, icon); b.onclick = (e) => { void fn(e); }; return b; };
+    this.btnLabels = tb('type', t('sLabels'), () => { this.plugin.settings.labels = !this.plugin.settings.labels; void this.plugin.saveSettings(); this.plugin.refreshViews('style'); this.plugin.views().forEach((v) => v.updateToolbar()); });
+    this.btnRotate = tb('rotate-3d', t('rotate'), () => { this.plugin.settings.rotate = !this.plugin.settings.rotate; void this.plugin.saveSettings(); this.plugin.refreshViews('style'); });
+    this.btnActivity = tb('flame', t('activity'), () => { this.activity = !this.activity; this.plugin.settings.activity = this.activity; void this.plugin.saveSettings(); this.updateToolbar(); this.applyHeat(); });
     this.btnReview = tb('calendar-clock', t('reviewTitle'), (e) => this.reviewMenu(e));
     this.btnViews = tb('bookmark', t('viewsTitle'), (e) => this.viewsMenu(e));
     this.btnTime = tb('history', t('tlTitle'), () => this.toggleTimeline());
@@ -986,7 +1030,7 @@ export class CortexGraphView extends ItemView {
     this.btnPanel = tb('sliders-horizontal', t('panel'), () => { const v = !this.panel.isShown(); this.panel.toggle(v); if (v) { this.fillPanel(); this.hideSheet(); } this.updateToolbar(); });
   }
 
-  updateToolbar() {
+  updateToolbar(): void {
     if (!this.btnGlobal) return;
     const local = this.mode === 'local' || !!this.focusPath;
     this.btnGlobal.toggleClass('is-active', !local);
@@ -1002,11 +1046,11 @@ export class CortexGraphView extends ItemView {
     if (this.panel) this.btnPanel.toggleClass('is-active', this.panel.isShown());
   }
 
-  buildNav(root) {
+  buildNav(root: HTMLElement): void {
     const nav = root.createDiv({ cls: 'cg-nav' });
     this.navMini = !!this.plugin.settings.navMini;
     nav.toggleClass('is-mini', this.navMini);
-    const btn = (parent, a, icon, label, cls) => {
+    const btn = (parent: HTMLElement, a: string, icon: string, label: string, cls?: string): HTMLButtonElement => {
       const b = parent.createEl('button', { cls: 'cg-nb' + (cls ? ' ' + cls : ''), attr: { 'aria-label': label, 'data-a': a } });
       setIcon(b, icon); return b;
     };
@@ -1015,25 +1059,25 @@ export class CortexGraphView extends ItemView {
     btn(pad, 'left', 'chevron-left', t('left')); btn(pad, 'fit', 'maximize', t('fit'), 'cg-fit'); btn(pad, 'right', 'chevron-right', t('right'));
     btn(pad, 'rl', 'rotate-ccw', t('rotL')); btn(pad, 'down', 'chevron-down', t('down')); btn(pad, 'rr', 'rotate-cw', t('rotR'));
     btn(pad, 'zout', 'minus', t('zoomOut')); btn(pad, 'hide', 'move', t('navToggle'), 'cg-navtoggle'); btn(pad, 'zin', 'plus', t('zoomIn'));
-    let holdA = null, holdBtn = null, raf = 0, last = 0;
-    const loop = (ts) => { if (!holdA) return; const k = Math.min(4, (ts - last) / 16.7); last = ts; this.navStep(holdA, k); raf = window.requestAnimationFrame(loop); };
+    let holdA: string | null = null, holdBtn: Element | null = null, raf = 0, last = 0;
+    const loop = (ts: number) => { if (!holdA) return; const k = Math.min(4, (ts - last) / 16.7); last = ts; this.navStep(holdA, k); raf = window.requestAnimationFrame(loop); };
     const stop = () => { holdA = null; window.cancelAnimationFrame(raf); if (holdBtn) holdBtn.removeClass('is-held'); holdBtn = null; };
     this.registerDomEvent(nav, 'pointerdown', (e) => {
       const b = e.target instanceof Element ? e.target.closest('.cg-nb') : null; if (!b) return;
       e.preventDefault(); e.stopPropagation();
       const a = b.getAttribute('data-a');
-      if (a === 'hide') { this.navMini = !this.navMini; nav.toggleClass('is-mini', this.navMini); this.plugin.settings.navMini = this.navMini; this.plugin.saveSettings(); return; }
+      if (a === 'hide') { this.navMini = !this.navMini; nav.toggleClass('is-mini', this.navMini); this.plugin.settings.navMini = this.navMini; void this.plugin.saveSettings(); return; }
       if (a === 'fit') { this.navStep('fit', 1); return; }
       stop(); holdA = a; holdBtn = b; b.addClass('is-held');
       try { b.setPointerCapture(e.pointerId); } catch { /* ignore */ }
       this.navStep(a, 8);
       window.setTimeout(() => { if (holdA === a) { last = performance.now(); raf = window.requestAnimationFrame(loop); } }, 220);
     });
-    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) this.registerDomEvent(nav, ev, stop);
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) this.registerDomEvent(nav, ev, stop);
     this.register(stop);
   }
 
-  navStep(a, k) {
+  navStep(a: string, k: number): void {
     const R = this.R; if (!R || !R.active) return;
     const step = 9 * k, zf = Math.pow(1.025, k);
     if (a === 'fit') R.resetView();
@@ -1044,14 +1088,14 @@ export class CortexGraphView extends ItemView {
     else if (a === 'tu') R.orbitBy(0, 0.02 * k); else if (a === 'td') R.orbitBy(0, -0.02 * k);
   }
 
-  buildSheet(root) {
+  buildSheet(root: HTMLElement): void {
     const sh = root.createDiv({ cls: 'cg-sheet' }); sh.toggle(false);
     this.sheet = sh;
     this.sheetTitle = sh.createDiv({ cls: 'cg-sheet-title' });
     this.sheetMeta = sh.createDiv({ cls: 'cg-sheet-meta' });
     this.sheetBtns = sh.createDiv({ cls: 'cg-sheet-btns' });
-    const b = (p, txt, fn, cta) => { const el = p.createEl('button', { text: txt, cls: cta ? 'mod-cta' : '' }); el.onclick = fn; return el; };
-    b(this.sheetBtns, t('open'), () => { if (this.sel >= 0) this.openNote(this.sel, false); }, true);
+    const b = (p: HTMLElement, txt: string, fn: () => void, cta?: boolean): HTMLButtonElement => { const el = p.createEl('button', { text: txt, cls: cta ? 'mod-cta' : '' }); el.onclick = fn; return el; };
+    b(this.sheetBtns, t('open'), () => { if (this.sel >= 0) void this.openNote(this.sel, false); }, true);
     b(this.sheetBtns, t('focus'), () => { const n = this.noteOf(this.sel); if (n) this.focusOn(n.path); });
     b(this.sheetBtns, t('pathFrom'), () => { if (this.sel >= 0) this.startPath(this.sel); });
     this.sheetPathBtns = sh.createDiv({ cls: 'cg-sheet-btns' }); this.sheetPathBtns.toggle(false);
@@ -1059,7 +1103,7 @@ export class CortexGraphView extends ItemView {
     b(this.sheetPathBtns, t('pathClear'), () => { this.pathPending = false; this.R.setPath(null); this.hideSheet(); });
   }
 
-  showSheet(k) {
+  showSheet(k: number): void {
     const nd = this.G.nodes[k];
     if (this.panel.isShown()) return;
     this.sheetTitle.setText(nd.label);
@@ -1088,18 +1132,18 @@ export class CortexGraphView extends ItemView {
     this.sheet.toggle(true);
     this.syncSheetSpace();
   }
-  hideSheet() { if (this.sheet) { this.sheet.toggle(false); this.syncSheetSpace(); } }
-  syncSheetSpace() {
+  hideSheet(): void { if (this.sheet) { this.sheet.toggle(false); this.syncSheetSpace(); } }
+  syncSheetSpace(): void {
     const h = this.sheet && this.sheet.isShown() ? this.sheet.offsetHeight + 8 : 0;
     this.rootEl.setCssProps({ '--cg-sheet-h': h + 'px' });
   }
 
-  buildPanel(root) {
+  buildPanel(root: HTMLElement): void {
     const p = root.createDiv({ cls: 'cg-panel' }); p.toggle(false);
     this.panel = p;
     const head = p.createDiv({ cls: 'cg-panel-head' });
     head.createEl('b', { text: t('panel') });
-    const hb = (txt, fn) => { const b = head.createEl('button', { text: txt }); b.onclick = fn; };
+    const hb = (txt: string, fn: () => void) => { const b = head.createEl('button', { text: txt }); b.onclick = fn; };
     hb(t('relayout'), () => this.relayout());
     hb(t('reset'), () => { this.plugin.resetStyle(); this.fillPanel(); this.R.setStyle(this.styleObj()); this.simSend({ cmd: 'params', params: this.simParams() }); });
     const x = head.createEl('button', { cls: 'clickable-icon', attr: { 'aria-label': t('close') } }); setIcon(x, 'x');
@@ -1108,13 +1152,13 @@ export class CortexGraphView extends ItemView {
     this.panelBody = p.createDiv({ cls: 'cg-panel-body' });
   }
 
-  fillPanel() {
+  fillPanel(): void {
     if (this.capture) this.capture();
     this.panelBody.empty();
     const body = this.panelBody;
     const st = this.plugin.settings.style;
-    const secs = {};
-    let sec = body;
+    const secs: Record<string, HTMLElement> = {};
+    let sec: HTMLElement = body;
     for (const row of PANEL) {
       if (row.length === 1) { sec = body.createDiv({ cls: 'cg-sec-wrap' }); sec.createDiv({ cls: 'cg-sec', text: t(row[0]) }); secs[row[0]] = sec; continue; }
       const [key, min, max, step] = row;
@@ -1127,13 +1171,13 @@ export class CortexGraphView extends ItemView {
       rg.oninput = () => { const v = Number(rg.value); out.setText(fmt(v, step)); this.setStyleKey(key, v); };
     }
     const ps = this.plugin.settings;
-    const pick = (parent, label, key, opts, def) => {
+    const pick = (parent: HTMLElement, label: string, key: 'labelFont' | 'labelStyle', opts: string[], def: string) => {
       const row = parent.createEl('label', { cls: 'cg-row cg-row-check' });
       row.createSpan({ text: t(label) });
       const d = row.createEl('select', { cls: 'dropdown' });
       for (const o of opts) d.createEl('option', { value: o, text: t(key + '_' + o) });
       d.value = ps[key] || def;
-      d.onchange = () => { ps[key] = d.value; this.plugin.saveSettings(); this.plugin.views().forEach((v) => v.R && v.R.setStyle(v.styleObj())); };
+      d.onchange = () => { ps[key] = d.value; void this.plugin.saveSettings(); this.plugin.views().forEach((v) => v.R && v.R.setStyle(v.styleObj())); };
     };
     if (secs.secForces) {
       const row = secs.secForces.createEl('label', { cls: 'cg-row cg-row-check' });
@@ -1154,24 +1198,24 @@ export class CortexGraphView extends ItemView {
     const auto = sec.createEl('label', { cls: 'cg-row cg-row-check' });
     auto.createSpan({ text: t('autoShapes') });
     const acb = auto.createEl('input', { type: 'checkbox' }); acb.checked = !!ps.hubStars;
-    acb.onchange = () => { ps.hubStars = acb.checked; this.plugin.saveSettings(); this.plugin.views().forEach((w) => w.reshape()); };
+    acb.onchange = () => { ps.hubStars = acb.checked; void this.plugin.saveSettings(); this.plugin.views().forEach((w) => w.reshape()); };
     const dr = sec.createEl('label', { cls: 'cg-row cg-row-check' });
     dr.createSpan({ text: t('shapeRest') });
     const sel = dr.createEl('select', { cls: 'dropdown' });
     for (const k of ['kreis', 'ring', 'stern', 'raute', 'quadrat']) sel.createEl('option', { value: k, text: t('shape_' + k) });
     sel.value = ps.shapeDefault || 'kreis';
-    sel.onchange = () => { ps.shapeDefault = sel.value; this.plugin.saveSettings(); this.plugin.views().forEach((w) => w.reshape()); };
+    sel.onchange = () => { ps.shapeDefault = sel.value; void this.plugin.saveSettings(); this.plugin.views().forEach((w) => w.reshape()); };
     this.fillControls(this.panelBody);
     this.buildTabs();
   }
 
   /* one section per tab, so the graph stays visible while adjusting */
-  buildTabs() {
-    const pages = [...this.panelBody.children].filter((el) => el.hasClass('cg-sec-wrap') || el.hasClass('cg-controls'));
-    const GROUPS = [['tabForces', [0]], ['tabNodes', [1]], ['tabLook', [2, 3]], ['tabControls', [4, 5]]];
+  buildTabs(): void {
+    const pages = ([...this.panelBody.children] as HTMLElement[]).filter((el) => el.hasClass('cg-sec-wrap') || el.hasClass('cg-controls'));
+    const GROUPS: [string, number[]][] = [['tabForces', [0]], ['tabNodes', [1]], ['tabLook', [2, 3]], ['tabControls', [4, 5]]];
     const bar = this.panelTabs; bar.empty();
     const cur = Math.min(GROUPS.length - 1, Math.max(0, this.plugin.settings.panelTab || 0));
-    const show = (g) => {
+    const show = (g: number) => {
       pages.forEach((pg, k) => pg.toggle(GROUPS[g][1].includes(k)));
       const wide = GROUPS[g][0] === 'tabControls';   // keyboard and mouse side by side
       this.panelBody.toggleClass('cg-two-col', wide); this.panel.toggleClass('is-wide', wide);
@@ -1180,18 +1224,18 @@ export class CortexGraphView extends ItemView {
     pages.forEach((pg) => pg.addClass('cg-tabpage'));
     GROUPS.forEach(([key], g) => {
       const b = bar.createEl('button', { cls: 'cg-tab', text: t(key) });
-      b.onclick = () => { if (this.capture) this.capture(); this.plugin.settings.panelTab = g; this.plugin.saveSettings(); show(g); };
+      b.onclick = () => { if (this.capture) this.capture(); this.plugin.settings.panelTab = g; void this.plugin.saveSettings(); show(g); };
     });
     show(cur);
   }
 
 
-  fillControls(body) {
+  fillControls(body: HTMLElement): void {
     const ps = this.plugin.settings;
     let box = body.createDiv({ cls: 'cg-controls' });
     box.createDiv({ cls: 'cg-sec', text: t('ctrlKeyboard') });
-    const save = () => { this.plugin.saveSettings(); this.plugin.views().forEach((v) => { if (v.R) v.R.mouse = ps.mouse; }); };
-    const btns = [];
+    const save = () => { void this.plugin.saveSettings(); this.plugin.views().forEach((v) => { if (v.R) v.R.mouse = ps.mouse; }); };
+    const btns: { b: HTMLButtonElement; a: string; i: number }[] = [];
     const relabel = () => btns.forEach(({ b, a, i }) => b.setText(keyLabel(ps.keys[a][i])));
     for (const a of KEY_ACTIONS) {
       const row = box.createDiv({ cls: 'cg-row cg-row-check cg-keyrow' });
@@ -1204,7 +1248,7 @@ export class CortexGraphView extends ItemView {
           ev.preventDefault();
           if (this.capture) this.capture();
           b.addClass('is-capturing'); b.setText('…');
-          const onKey = (e) => {
+          const onKey = (e: KeyboardEvent) => {
             e.preventDefault(); e.stopPropagation();
             if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return;
             if (e.key !== 'Escape') {
@@ -1224,7 +1268,7 @@ export class CortexGraphView extends ItemView {
     box.createDiv({ cls: 'cg-ctrl-hint', text: t('ctrlHintKeys') });
     box = body.createDiv({ cls: 'cg-controls' });
     box.createDiv({ cls: 'cg-sec', text: t('ctrlMouse') });
-    const sel = (label, key, opts) => {
+    const sel = (label: string, key: 'left' | 'right' | 'middle' | 'shift', opts: string[]) => {
       const row = box.createDiv({ cls: 'cg-row cg-row-check' });
       row.createSpan({ text: t(label) });
       const s = row.createEl('select', { cls: 'dropdown' });
@@ -1257,7 +1301,7 @@ export class CortexGraphView extends ItemView {
     box.createDiv({ cls: 'cg-ctrl-hint', text: t('ctrlHintMouse') });
   }
 
-  setStyleKey(key, v) {
+  setStyleKey(key: keyof StyleSettings, v: number): void {
     this.plugin.settings.style[key] = v;
     this.plugin.saveSettingsDebounced();
     if (SHAPE_KEYS.has(key)) { window.clearTimeout(this.shapeT); this.shapeT = window.setTimeout(() => this.reshape(), 60); }
@@ -1266,18 +1310,18 @@ export class CortexGraphView extends ItemView {
   }
 
   /* called by plugin when settings change */
-  onSettingsChanged(what) {
+  onSettingsChanged(what: string): void {
     if (!this.R || !this.R.active) return;
     if (what === 'style') { this.R.showLabels = this.plugin.settings.labels; this.R.setStyle(this.styleObj()); this.updateToolbar(); }
     else if (what === 'theme') this.applyTheme();
     else if (what === 'heat') this.applyHeat();
-    else { this.sig = ''; this.rebuild(what === 'layout'); }
+    else { this.sig = ''; void this.rebuild(what === 'layout'); }
   }
 }
 
-function fmt(v, step) { return step >= 1 ? String(Math.round(v)) : (+v).toFixed(step < 0.1 ? 2 : 1); }
+function fmt(v: number, step: number): string { return step >= 1 ? String(Math.round(v)) : (+v).toFixed(step < 0.1 ? 2 : 1); }
 
-function toHex(c) {
+function toHex(c: string): string {
   c = c.trim();
   if (c.startsWith('#')) return c.length === 4 ? '#' + c[1] + c[1] + c[2] + c[2] + c[3] + c[3] : c.slice(0, 7);
   const m = c.match(/rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/);
@@ -1286,11 +1330,12 @@ function toHex(c) {
 }
 
 class NameModal extends Modal {
-  constructor(app, title, value, onOk) { super(app); this.title = title; this.value = value; this.onOk = onOk; }
-  onOpen() {
+  title: string; value: string; onOk: (v: string) => void | Promise<void>;
+  constructor(app: App, title: string, value: string, onOk: (v: string) => void | Promise<void>) { super(app); this.title = title; this.value = value; this.onOk = onOk; }
+  onOpen(): void {
     this.titleEl.setText(this.title);
     let val = this.value;
-    const go = () => { const v = (val || '').trim(); if (v) { this.close(); this.onOk(v); } };
+    const go = () => { const v = (val || '').trim(); if (v) { this.close(); void this.onOk(v); } };
     new Setting(this.contentEl).setName(t('viewName')).addText((tx) => {
       tx.setValue(val).onChange((v) => { val = v; });
       tx.inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
@@ -1298,16 +1343,16 @@ class NameModal extends Modal {
     });
     new Setting(this.contentEl).addButton((b) => b.setButtonText(t('viewSaveBtn')).setCta().onClick(go));
   }
-  onClose() { this.contentEl.empty(); }
+  onClose(): void { this.contentEl.empty(); }
 }
 
 /* invisible folder nodes: every note hangs on its folder, folders on their parent folder */
-function addFolderAnchors(G) {
-  const anchors = new Map();
-  const anchorOf = (folder) => {
+function addFolderAnchors(G: Graph): void {
+  const anchors = new Map<string, number>();
+  const anchorOf = (folder: string): number => {
     if (anchors.has(folder)) return anchors.get(folder);
     const k = G.nodes.length;
-    G.nodes.push({ key: 'folder:' + folder, note: null, anchor: true, label: folder.split('/').pop(), deg: 0, x: 0, y: 0, z: 0 });
+    G.nodes.push({ key: 'folder:' + folder, note: null, ghost: false, anchor: true, label: folder.split('/').pop(), deg: 0, x: 0, y: 0, z: 0 });
     anchors.set(folder, k);
     if (folder.includes('/')) { const p = anchorOf(folder.slice(0, folder.lastIndexOf('/'))); G.edges.push([p, k]); G.nodes[p].deg++; G.nodes[k].deg++; }
     return k;
@@ -1325,8 +1370,9 @@ function addFolderAnchors(G) {
 
 /* after a recording: preview, then save as (download), save into the vault or discard */
 class RecordingModal extends Modal {
-  constructor(view, blob, name) { super(view.app); this.view = view; this.blob = blob; this.name = name; }
-  onOpen() {
+  view: CortexGraphView; blob: Blob; name: string; url = '';
+  constructor(view: CortexGraphView, blob: Blob, name: string) { super(view.app); this.view = view; this.blob = blob; this.name = name; }
+  onOpen(): void {
     const { contentEl } = this;
     this.titleEl.setText(t('recTitle'));
     this.url = URL.createObjectURL(this.blob);
@@ -1339,9 +1385,9 @@ class RecordingModal extends Modal {
       .addButton((b) => b.setButtonText(t('recDiscard')).setWarning().onClick(() => this.close()))
       .addButton((b) => b.setButtonText(t('recToVault')).onClick(async () => { await this.view.saveToVault(this.blob, fix(), true); this.close(); }))
       .addButton((b) => b.setButtonText(t('recSaveAs')).setCta().onClick(() => {
-        const a = document.createElement('a'); a.href = this.url; a.download = fix(); document.body.appendChild(a); a.click(); a.remove();
+        const a = createEl('a'); a.href = this.url; a.download = fix(); document.body.appendChild(a); a.click(); a.remove();
         window.setTimeout(() => this.close(), 1500);
       }));
   }
-  onClose() { this.contentEl.empty(); if (this.url) window.setTimeout(() => URL.revokeObjectURL(this.url), 3000); }
+  onClose(): void { this.contentEl.empty(); if (this.url) window.setTimeout(() => URL.revokeObjectURL(this.url), 3000); }
 }

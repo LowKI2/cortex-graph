@@ -1,29 +1,42 @@
-import { Plugin, PluginSettingTab, Setting, FuzzySuggestModal, Modal, Notice, TFolder, TFile, FileSystemAdapter, debounce, getAllTags } from 'obsidian';
+import { App, Debouncer, Plugin, PluginSettingTab, Setting, FuzzySuggestModal, Modal, Notice, TAbstractFile, TFolder, TFile, FileSystemAdapter, debounce, getAllTags } from 'obsidian';
+import type { CGSettings, GraphCfg, Note, StyleSettings } from './types';
 
 const HOOK_URL = 'https://github.com/LowKI2/cortex-graph/blob/main/tools/cortex-activity-hook.mjs';
-const vaultBase = (app) => (app.vault.adapter instanceof FileSystemAdapter ? app.vault.adapter.getBasePath() : '').replace(/\\/g, '/');
+const vaultBase = (app: App): string => (app.vault.adapter instanceof FileSystemAdapter ? app.vault.adapter.getBasePath() : '').replace(/\\/g, '/');
 import { parseGraphCfg } from './model';
 import { FolderColors } from './folders';
 import { CortexGraphView, VIEW_TYPE, DEFAULT_KEYS, DEFAULT_MOUSE, KEY_ACTIONS } from './view';
 import { t } from './i18n';
 
 export const SHAPES = ['kreis', 'ring', 'stern', 'raute', 'quadrat'];
-const STYLE_DEFAULTS = { shapeSize: 1, shapeGroup: 0.4, hubPull: 0.5, center: 2.25, repel: 5.6, link: 0.09, dist: 8, range: 120, nodeSize: 0.35, degSize: 0.75, glow: 1.3, line: 0.7,
+const STYLE_DEFAULTS: StyleSettings = { shapeSize: 1, shapeGroup: 0.4, hubPull: 0.5, center: 2.25, repel: 5.6, link: 0.09, dist: 8, range: 120, nodeSize: 0.35, degSize: 0.75, glow: 1.3, line: 0.7,
   font: 3, fontGrow: 1.05, boldFrom: 28, labelFrom: 3, maxLabels: 80, dimOthers: 0.1, nodeBright: 0.55, glowBright: 1, shStern: 0, shRaute: 0, shQuadrat: 0, shRing: 0.5 };
-const DEFAULTS = {
+const DEFAULTS: CGSettings = {
   layout: '3d', shape: 'free', background: 'space', colorBy: 'obsidian', filters: true, orphans: false, labels: true, rotate: true,
-  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], folderLinks: 'hidden', rankBy: 'auto', recSave: 'ask', focusCamera: true, staleDays: 90, shapeDefault: 'kreis', hubStars: false, folderShapes: {}, noteShapes: {}, noteWeights: {}, claudeLive: true, galaxies: true, views: [], style: Object.assign({}, STYLE_DEFAULTS),
+  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], folderLinks: 'hidden', rankBy: 'auto', recSave: 'ask', focusCamera: true, staleDays: 90, shapeDefault: 'kreis', hubStars: false, folderShapes: {}, noteShapes: {}, noteWeights: {}, claudeLive: true, galaxies: true, views: [], style: Object.assign({}, STYLE_DEFAULTS), keys: {}, mouse: Object.assign({}, DEFAULT_MOUSE),
 };
 
+type PositionMap = Record<string, number[]>;
+
 export default class CortexGraphPlugin extends Plugin {
-  async onload() {
+  settings: CGSettings;
+  saveSettingsDebounced: Debouncer<[], void>;
+  startedAt = 0;
+  externalWrites = new Set<string>();
+  lastEdit = new Map<string, number>();
+  selfWrites = new Map<string, number>();
+  logPos = -1;
+  fc: FolderColors;
+  posCache: Record<string, PositionMap> | undefined;
+
+  async onload(): Promise<void> {
     await this.loadSettings();
-    this.saveSettingsDebounced = debounce(() => this.saveSettings(), 400, true);
+    this.saveSettingsDebounced = debounce(() => { void this.saveSettings(); }, 400, true);
     this.registerView(VIEW_TYPE, (leaf) => new CortexGraphView(leaf, this));
     this.registerHoverLinkSource(VIEW_TYPE, { display: 'Cortex Graph', defaultMod: true });
-    this.addRibbonIcon('orbit', t('cmdOpen'), () => this.openGraph('global'));
-    this.addCommand({ id: 'open', name: t('cmdOpen'), callback: () => this.openGraph('global') });
-    this.addCommand({ id: 'open-local', name: t('cmdOpenLocal'), callback: () => this.openGraph('local') });
+    this.addRibbonIcon('orbit', t('cmdOpen'), () => { void this.openGraph('global'); });
+    this.addCommand({ id: 'open', name: t('cmdOpen'), callback: () => { void this.openGraph('global'); } });
+    this.addCommand({ id: 'open-local', name: t('cmdOpenLocal'), callback: () => { void this.openGraph('local'); } });
     this.addCommand({
       id: 'relayout', name: t('cmdRelayout'),
       checkCallback: (checking) => { const v = this.activeGraph(); if (!v) return false; if (!checking) v.relayout(); return true; },
@@ -33,10 +46,8 @@ export default class CortexGraphPlugin extends Plugin {
 
     // live activity: Claude (or any tool) reading / writing notes
     this.startedAt = Date.now();
-    this.externalWrites = new Set();
-    this.lastEdit = new Map(); this.selfWrites = new Map();
     this.registerEvent(this.app.workspace.on('editor-change', (ed, info) => { if (info && info.file) this.lastEdit.set(info.file.path, Date.now()); }));
-    const onExternal = (file) => {
+    const onExternal = (file: TAbstractFile) => {
       if (!(file instanceof TFile) || file.extension !== 'md') return;
       const now = Date.now();
       if (now - (this.lastEdit.get(file.path) || 0) < 4000 || now - (this.selfWrites.get(file.path) || 0) < 4000) return;
@@ -46,11 +57,11 @@ export default class CortexGraphPlugin extends Plugin {
     this.registerEvent(this.app.vault.on('modify', onExternal));
     this.registerEvent(this.app.vault.on('create', onExternal));
     this.logPos = -1;
-    this.registerInterval(window.setInterval(() => this.pollActivityLog(), 1200));
+    this.registerInterval(window.setInterval(() => { void this.pollActivityLog(); }, 1200));
 
     // folder colors in the file explorer
     this.fc = new FolderColors(this);
-    this.app.workspace.onLayoutReady(() => { this.fc.watch(); this.fc.refresh(); });
+    this.app.workspace.onLayoutReady(() => { this.fc.watch(); void this.fc.refresh(); });
     this.registerEvent(this.app.workspace.on('layout-change', () => { this.fc.watch(); this.fc.requestApply(); }));
     this.registerEvent(this.app.metadataCache.on('resolved', () => this.fc.requestRefresh()));
     this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => this.fc.addMenu(menu, file)));
@@ -59,20 +70,20 @@ export default class CortexGraphPlugin extends Plugin {
       for (const m of [this.settings.noteShapes, this.settings.noteWeights]) {
         for (const k of Object.keys(m)) if (k === oldPath || k.startsWith(oldPath + '/')) { m[file.path + k.slice(oldPath.length)] = m[k]; delete m[k]; changed = true; }
       }
-      if (!(file instanceof TFolder)) { if (changed) this.saveSettings(); return; }
-      for (const fc of [this.settings.folderColors, this.settings.folderWeights, this.settings.folderShapes]) {
+      if (!(file instanceof TFolder)) { if (changed) void this.saveSettings(); return; }
+      for (const fc of [this.settings.folderColors, this.settings.folderWeights, this.settings.folderShapes] as Record<string, unknown>[]) {
         for (const k of Object.keys(fc)) if (k === oldPath || k.startsWith(oldPath + '/')) { fc[file.path + k.slice(oldPath.length)] = fc[k]; delete fc[k]; changed = true; }
       }
       const hf = this.settings.hiddenFolders;
       hf.forEach((k, i) => { if (k === oldPath || k.startsWith(oldPath + '/')) { hf[i] = file.path + k.slice(oldPath.length); changed = true; } });
-      if (changed) this.saveSettings();
+      if (changed) void this.saveSettings();
       this.fc.requestRefresh();
     }));
   }
 
-  markSelf(path) { this.selfWrites.set(path, Date.now()); }
+  markSelf(path: string): void { this.selfWrites.set(path, Date.now()); }
 
-  activity(path, op) {
+  activity(path: string, op: 'read' | 'write'): void {
     if (!this.settings.claudeLive) return;
     if (op === 'write') this.externalWrites.add(path);
     for (const v of this.views()) v.onActivity(path, op);
@@ -80,7 +91,7 @@ export default class CortexGraphPlugin extends Plugin {
 
   /* <vault>/.cortex/activity.jsonl: one JSON object per line {"op":"read"|"write","path":"..."} – written by the
      Cortex MCP server or a Claude Code hook, so reads become visible too */
-  async pollActivityLog() {
+  async pollActivityLog(): Promise<void> {
     const ad = this.app.vault.adapter, p = '.cortex/activity.jsonl';
     try {
       const st = await ad.stat(p);
@@ -94,8 +105,8 @@ export default class CortexGraphPlugin extends Plugin {
       for (const line of new TextDecoder().decode(chunk).split('\n')) {
         if (!line.trim()) continue;
         try {
-          const ev = JSON.parse(line);
-          let path = String(ev.path || '').replace(/\\/g, '/');
+          const ev = JSON.parse(line) as { op?: string; path?: string };
+          let path = (typeof ev.path === 'string' ? ev.path : '').replace(/\\/g, '/');
           const base = vaultBase(this.app);
           if (base && path.toLowerCase().startsWith(base.toLowerCase() + '/')) path = path.slice(base.length + 1);
           if (path) this.activity(path, ev.op === 'write' ? 'write' : 'read');
@@ -106,14 +117,14 @@ export default class CortexGraphPlugin extends Plugin {
   }
 
   // ------------------------------------------------ shared data access
-  collect() {
+  collect(): { notes: Note[]; byPath: Map<string, Note> } {
     const app = this.app, files = app.vault.getMarkdownFiles();
-    const byPath = new Map();
-    const notes = files.map((f, i) => {
+    const byPath = new Map<string, Note>();
+    const notes = files.map((f, i): Note => {
       const cache = app.metadataCache.getFileCache(f);
       const tags = cache ? (getAllTags(cache) || []).map((x) => x.replace(/^#/, '')) : [];
       const n = { i, file: f, path: f.path, name: f.basename, folder: f.path.includes('/') ? f.path.split('/')[0] : '',
-        tags, fm: (cache && cache.frontmatter) || {}, mtime: f.stat.mtime, ctime: f.stat.ctime, out: new Set(), back: new Set(), unresolved: [] };
+        tags, fm: (cache && cache.frontmatter) || {}, mtime: f.stat.mtime, ctime: f.stat.ctime, out: new Set<number>(), back: new Set<number>(), unresolved: [] as string[] };
       byPath.set(f.path, n);
       return n;
     });
@@ -126,7 +137,7 @@ export default class CortexGraphPlugin extends Plugin {
     return { notes, byPath };
   }
 
-  async readGraphCfg() {
+  async readGraphCfg(): Promise<GraphCfg> {
     try {
       const p = this.app.vault.configDir + '/graph.json';
       if (await this.app.vault.adapter.exists(p)) return parseGraphCfg(await this.app.vault.adapter.read(p));
@@ -134,13 +145,13 @@ export default class CortexGraphPlugin extends Plugin {
     return parseGraphCfg(null);
   }
 
-  onunload() {
+  onunload(): void {
     if (this.fc) this.fc.clear();
-    try { delete window.__THREE__; } catch { /* ignore */ }
+    try { delete (window as unknown as { __THREE__?: string }).__THREE__; } catch { /* ignore */ }
   }
 
-  async loadSettings() {
-    const d = (await this.loadData()) || {};
+  async loadSettings(): Promise<void> {
+    const d = ((await this.loadData()) as Partial<CGSettings> | null) || {};
     this.settings = Object.assign({}, DEFAULTS, d);
     this.settings.folderColors = Object.assign({}, d.folderColors || {});
     this.settings.folderWeights = Object.assign({}, d.folderWeights || {});
@@ -159,54 +170,54 @@ export default class CortexGraphPlugin extends Plugin {
     this.settings.mouse = Object.assign({}, DEFAULT_MOUSE, d.mouse || {});
     if (migrate) await this.saveData(this.settings);
   }
-  async saveSettings() { await this.saveData(this.settings); }
-  resetStyle() {
+  async saveSettings(): Promise<void> { await this.saveData(this.settings); }
+  resetStyle(): void {
     this.settings.style = Object.assign({}, STYLE_DEFAULTS);
     this.settings.keys = {}; for (const a of KEY_ACTIONS) this.settings.keys[a] = DEFAULT_KEYS[a].slice();
     Object.assign(this.settings.mouse, DEFAULT_MOUSE);
-    this.saveSettings();
+    void this.saveSettings();
   }
 
-  views() { return this.app.workspace.getLeavesOfType(VIEW_TYPE).map((l) => l.view).filter((v) => v instanceof CortexGraphView); }
-  activeGraph() { const v = this.app.workspace.getActiveViewOfType(CortexGraphView); return v || this.views()[0] || null; }
-  refreshViews(what) { for (const v of this.views()) v.onSettingsChanged(what); }
+  views(): CortexGraphView[] { return this.app.workspace.getLeavesOfType(VIEW_TYPE).map((l) => l.view).filter((v): v is CortexGraphView => v instanceof CortexGraphView); }
+  activeGraph(): CortexGraphView | null { const v = this.app.workspace.getActiveViewOfType(CortexGraphView); return v || this.views()[0] || null; }
+  refreshViews(what: string): void { for (const v of this.views()) v.onSettingsChanged(what); }
 
-  async openGraph(mode) {
+  async openGraph(mode: 'global' | 'local'): Promise<CortexGraphView | null> {
     const ws = this.app.workspace;
     const existing = this.views().find((v) => v.mode === mode);
-    if (existing) { ws.revealLeaf(existing.leaf); return existing; }
+    if (existing) { void ws.revealLeaf(existing.leaf); return existing; }
     const leaf = mode === 'local' ? ws.getRightLeaf(false) : ws.getLeaf('tab');
     if (!leaf) return null;
     await leaf.setViewState({ type: VIEW_TYPE, active: true, state: { mode, depth: this.settings.depth } });
-    ws.revealLeaf(leaf);
-    return leaf.view;
+    void ws.revealLeaf(leaf);
+    return leaf.view instanceof CortexGraphView ? leaf.view : null;
   }
 
-  findPath() {
+  findPath(): void {
     const files = this.app.vault.getMarkdownFiles();
     new NotePicker(this.app, files, t('pickFrom'), (a) => {
       new NotePicker(this.app, files, t('pickTo'), async (b) => {
         let v = this.views().find((x) => x.mode === 'global' && !x.focusPath);
         if (!v) v = await this.openGraph('global');
         if (!v) return;
-        this.app.workspace.revealLeaf(v.leaf);
-        const tryIt = (n) => { if (v.G && v.G.idx.size) v.showPathBetween(a.path, b.path); else if (n > 0) window.setTimeout(() => tryIt(n - 1), 300); };
+        void this.app.workspace.revealLeaf(v.leaf);
+        const tryIt = (n: number): void => { if (v.G && v.G.idx.size) v.showPathBetween(a.path, b.path); else if (n > 0) window.setTimeout(() => tryIt(n - 1), 300); };
         tryIt(20);
       }).open();
     }).open();
   }
 
   // ------------------------------------------------ saved layout positions (separate file, can be large)
-  posFile(flat) { return this.manifest.dir + (flat ? '/positions-flat.json' : '/positions.json'); }
-  async loadPositions(flat) {
+  posFile(flat: boolean): string { return this.manifest.dir + (flat ? '/positions-flat.json' : '/positions.json'); }
+  async loadPositions(flat: boolean): Promise<PositionMap> {
     const key = flat ? 'flat' : '3d';
     if (this.posCache && this.posCache[key]) return this.posCache[key];
-    let data = {};
-    try { const p = this.posFile(flat); if (await this.app.vault.adapter.exists(p)) data = JSON.parse(await this.app.vault.adapter.read(p)) || {}; } catch { data = {}; }
+    let data: PositionMap = {};
+    try { const p = this.posFile(flat); if (await this.app.vault.adapter.exists(p)) data = (JSON.parse(await this.app.vault.adapter.read(p)) as PositionMap) || {}; } catch { data = {}; }
     (this.posCache ||= {})[key] = data;
     return data;
   }
-  async savePositions(flat, map) {
+  async savePositions(flat: boolean, map: PositionMap | null): Promise<void> {
     const key = flat ? 'flat' : '3d';
     const data = map ? Object.assign(await this.loadPositions(flat), map) : {};
     (this.posCache ||= {})[key] = data;
@@ -214,19 +225,21 @@ export default class CortexGraphPlugin extends Plugin {
   }
 }
 
-class NotePicker extends FuzzySuggestModal {
-  constructor(app, files, placeholder, onPick) { super(app); this.files = files; this.onPick = onPick; this.setPlaceholder(placeholder); }
-  getItems() { return this.files; }
-  getItemText(f) { return f.path.replace(/\.md$/, ''); }
-  onChooseItem(f) { this.onPick(f); }
+class NotePicker extends FuzzySuggestModal<TFile> {
+  files: TFile[]; onPick: (f: TFile) => void | Promise<void>;
+  constructor(app: App, files: TFile[], placeholder: string, onPick: (f: TFile) => void | Promise<void>) { super(app); this.files = files; this.onPick = onPick; this.setPlaceholder(placeholder); }
+  getItems(): TFile[] { return this.files; }
+  getItemText(f: TFile): string { return f.path.replace(/\.md$/, ''); }
+  onChooseItem(f: TFile): void { void this.onPick(f); }
 }
 
 class CortexGraphSettingTab extends PluginSettingTab {
-  constructor(app, plugin) { super(app, plugin); this.plugin = plugin; }
-  display() {
+  plugin: CortexGraphPlugin;
+  constructor(app: App, plugin: CortexGraphPlugin) { super(app, plugin); this.plugin = plugin; }
+  display(): void {
     const el = this.containerEl, s = this.plugin.settings, p = this.plugin;
     el.empty();
-    const save = (what) => { p.saveSettings(); p.refreshViews(what); };
+    const save = (what: string) => { void void p.saveSettings(); p.refreshViews(what); };
     new Setting(el).setName(t('sDisplay')).setHeading();
     new Setting(el).setName(t('sLayout')).setDesc(t('sLayoutDesc')).addDropdown((d) => d
       .addOption('3d', t('s3d')).addOption('flat', t('sFlat')).setValue(s.layout)
@@ -236,10 +249,10 @@ class CortexGraphSettingTab extends PluginSettingTab {
       .onChange((v) => { s.background = v; save('theme'); }));
     new Setting(el).setName(t('sColorBy')).setDesc(t('sColorByDesc')).addDropdown((d) => d
       .addOption('obsidian', t('sColorObsidian')).addOption('folder', t('sColorFolder')).addOption('none', t('sColorNone')).setValue(s.colorBy)
-      .onChange((v) => { s.colorBy = v; save('data'); p.fc.refresh(); }));
+      .onChange((v) => { s.colorBy = v; save('data'); void p.fc.refresh(); }));
     new Setting(el).setName(t('sExplorer')).setDesc(t('sExplorerDesc')).addDropdown((d) => d
       .addOption('rows', t('sExplorerRows')).addOption('folders', t('sExplorerFolders')).addOption('off', t('sExplorerOff')).setValue(s.explorerColors)
-      .onChange((v) => { s.explorerColors = v; p.saveSettings(); p.fc.apply(); }));
+      .onChange((v) => { s.explorerColors = v; void p.saveSettings(); p.fc.apply(); }));
     new Setting(el).setName(t('sFilters')).setDesc(t('sFiltersDesc')).addToggle((tg) => tg.setValue(s.filters).onChange((v) => { s.filters = v; save('data'); }));
     new Setting(el).setName(t('sRankBy')).setDesc(t('sRankByDesc')).addDropdown((d) => d
       .addOption('auto', t('sRankAuto')).addOption('links', t('sRankLinks')).setValue(s.rankBy)
@@ -247,7 +260,7 @@ class CortexGraphSettingTab extends PluginSettingTab {
     new Setting(el).setName(t('sFolderLinks')).setDesc(t('sFolderLinksDesc')).addDropdown((d) => d
       .addOption('off', t('sFlOff')).addOption('hidden', t('sFlHidden')).addOption('lines', t('sFlLines')).setValue(s.folderLinks)
       .onChange((v) => { s.folderLinks = v; save('layout'); }));
-    new Setting(el).setName(t('sGalaxies')).setDesc(t('sGalaxiesDesc')).addToggle((tg) => tg.setValue(s.galaxies !== false).onChange((v) => { s.galaxies = v; p.saveSettings(); }));
+    new Setting(el).setName(t('sGalaxies')).setDesc(t('sGalaxiesDesc')).addToggle((tg) => tg.setValue(s.galaxies !== false).onChange((v) => { s.galaxies = v; void p.saveSettings(); }));
     new Setting(el).setName(t('sOrphans')).addToggle((tg) => tg.setValue(s.orphans).onChange((v) => { s.orphans = v; save('data'); }));
     new Setting(el).setName(t('sLabels')).addToggle((tg) => tg.setValue(s.labels).onChange((v) => { s.labels = v; save('style'); p.views().forEach((w) => w.updateToolbar()); }));
     new Setting(el).setName(t('sRotate')).addToggle((tg) => tg.setValue(s.rotate).onChange((v) => { s.rotate = v; save('style'); }));
@@ -256,23 +269,23 @@ class CortexGraphSettingTab extends PluginSettingTab {
     new Setting(el).setName(t('sStale')).setDesc(t('sStaleDesc')).addSlider((sl) => sl.setLimits(0, 365, 5).setValue(s.staleDays).setDynamicTooltip()
       .onChange((v) => { s.staleDays = v; save('heat'); }));
     new Setting(el).setName(t('sBehavior')).setHeading();
-    new Setting(el).setName(t('sFocusCam')).setDesc(t('sFocusCamDesc')).addToggle((tg) => tg.setValue(s.focusCamera).onChange((v) => { s.focusCamera = v; p.saveSettings(); }));
-    new Setting(el).setName(t('sClaudeLive')).setDesc(t('sClaudeLiveDesc')).addToggle((tg) => tg.setValue(s.claudeLive).onChange((v) => { s.claudeLive = v; p.saveSettings(); }));
+    new Setting(el).setName(t('sFocusCam')).setDesc(t('sFocusCamDesc')).addToggle((tg) => tg.setValue(s.focusCamera).onChange((v) => { s.focusCamera = v; void p.saveSettings(); }));
+    new Setting(el).setName(t('sClaudeLive')).setDesc(t('sClaudeLiveDesc')).addToggle((tg) => tg.setValue(s.claudeLive).onChange((v) => { s.claudeLive = v; void p.saveSettings(); }));
     new Setting(el).setName(t('sHook')).setDesc(t('sHookDesc')).addButton((b) => b.setButtonText(t('sHookBtn')).onClick(() => new HookModal(this.app).open()));
     new Setting(el).setName(t('sRecSave')).addDropdown((d) => d
       .addOption('ask', t('sRecAsk')).addOption('auto', t('sRecAuto')).setValue(s.recSave)
-      .onChange((v) => { s.recSave = v; p.saveSettings(); }));
-    new Setting(el).setName(t('sClick')).setDesc(t('sClickDesc')).addToggle((tg) => tg.setValue(s.clickOpens).onChange((v) => { s.clickOpens = v; p.saveSettings(); }));
+      .onChange((v) => { s.recSave = v; void p.saveSettings(); }));
+    new Setting(el).setName(t('sClick')).setDesc(t('sClickDesc')).addToggle((tg) => tg.setValue(s.clickOpens).onChange((v) => { s.clickOpens = v; void p.saveSettings(); }));
     new Setting(el).setName(t('sHalf')).setDesc(t('sHalfDesc')).addSlider((sl) => sl.setLimits(1, 720, 1).setValue(s.halfLife).setDynamicTooltip()
       .onChange((v) => { s.halfLife = v; save('heat'); }));
     new Setting(el).setName(t('sDepth')).addSlider((sl) => sl.setLimits(1, 3, 1).setValue(s.depth).setDynamicTooltip()
-      .onChange((v) => { s.depth = v; p.saveSettings(); }));
+      .onChange((v) => { s.depth = v; void p.saveSettings(); }));
   }
 }
 
 /* explains the activity log and installs the hook script for Claude Code (or any tool with hooks) */
 class HookModal extends Modal {
-  onOpen() {
+  onOpen(): void {
     const { contentEl } = this;
     const base = vaultBase(this.app);
     const script = (base ? base + '/' : '') + '.cortex/cortex-activity-hook.mjs';
@@ -291,5 +304,5 @@ class HookModal extends Modal {
     new Setting(contentEl).addButton((b) => b.setButtonText(t('hookCopy')).onClick(async () => { await navigator.clipboard.writeText(snippet); new Notice(t('hookCopied')); }));
     contentEl.createEl('p', { cls: 'setting-item-description', text: t('hookOther') });
   }
-  onClose() { this.contentEl.empty(); }
+  onClose(): void { this.contentEl.empty(); }
 }

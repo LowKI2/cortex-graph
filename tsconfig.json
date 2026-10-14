@@ -1,7 +1,9 @@
 {
   "compilerOptions": {
-    "allowJs": true, "checkJs": false, "noEmit": true, "target": "ES2020", "module": "ESNext",
-    "moduleResolution": "bundler", "lib": ["DOM", "ES2021"], "skipLibCheck": true, "strict": false
+    "target": "ES2020", "module": "ESNext", "moduleResolution": "bundler",
+    "lib": ["DOM", "DOM.Iterable", "ES2021"], "skipLibCheck": true, "noEmit": true,
+    "strict": false, "noImplicitAny": true, "noImplicitThis": true, "strictBindCallApply": true,
+    "isolatedModules": true, "allowSyntheticDefaultImports": true
   },
-  "include": ["src/**/*.js"]
+  "include": ["src/**/*.ts"]
 }

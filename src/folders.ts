@@ -1,35 +1,44 @@
 /* Cortex Graph – folder colors: colors the file explorer like the graph and lets you pick a color per folder. */
-import { Modal, Setting, TFolder, TFile, debounce } from 'obsidian';
+import { App, ColorComponent, Debouncer, Menu, Modal, Setting, TAbstractFile, TFolder, TFile, debounce } from 'obsidian';
 import { PALETTE, DEFAULT_COLOR, assignColors } from './model';
 import { t } from './i18n';
+import type CortexGraphPlugin from './main';
+import type { Note } from './types';
 
 const SWATCHES = [...PALETTE, '#e57373', '#90a4ae', '#ffffff'];
 
 /* majority color per top-level folder (ignores the neutral default color) */
-export function autoFolderColors(notes) {
-  const count = new Map();
+export function autoFolderColors(notes: Note[]): Record<string, string> {
+  const count = new Map<string, Map<string, number>>();
   for (const n of notes) {
     if (!n.folder || !n.color || n.color === DEFAULT_COLOR) continue;
-    let m = count.get(n.folder); if (!m) count.set(n.folder, (m = new Map()));
+    let m = count.get(n.folder); if (!m) count.set(n.folder, (m = new Map<string, number>()));
     m.set(n.color, (m.get(n.color) || 0) + 1);
   }
-  const out = {};
+  const out: Record<string, string> = {};
   for (const [f, m] of count) out[f] = [...m.entries()].sort((a, b) => b[1] - a[1])[0][0];
   return out;
 }
 
 export class FolderColors {
-  constructor(plugin) {
+  plugin: CortexGraphPlugin;
+  app: App;
+  auto: Record<string, string>;
+  observers: Map<HTMLElement, MutationObserver>;
+  requestApply: Debouncer<[], void>;
+  requestRefresh: Debouncer<[], void>;
+
+  constructor(plugin: CortexGraphPlugin) {
     this.plugin = plugin; this.app = plugin.app;
     this.auto = {};
-    this.observers = new Map();
+    this.observers = new Map<HTMLElement, MutationObserver>();
     this.requestApply = debounce(() => this.apply(), 120, true);
-    this.requestRefresh = debounce(() => this.refresh(), 1200, true);
+    this.requestRefresh = debounce(() => { void this.refresh(); }, 1200, true);
   }
 
-  get custom() { return this.plugin.settings.folderColors || (this.plugin.settings.folderColors = {}); }
+  get custom(): Record<string, string> { return this.plugin.settings.folderColors || (this.plugin.settings.folderColors = {}); }
 
-  async refresh() {
+  async refresh(): Promise<void> {
     const { notes } = this.plugin.collect();
     const cfg = await this.plugin.readGraphCfg();
     assignColors(notes, cfg, this.plugin.settings.colorBy);
@@ -37,14 +46,14 @@ export class FolderColors {
     this.apply();
   }
 
-  colorOf(path) {
+  colorOf(path: string): string | null {
     if (this.custom[path]) return this.custom[path];
     return !path.includes('/') ? this.auto[path] || null : null;
   }
 
-  explorers() { return this.app.workspace.getLeavesOfType('file-explorer').map((l) => l.view && l.view.containerEl).filter(Boolean); }
+  explorers(): HTMLElement[] { return this.app.workspace.getLeavesOfType('file-explorer').map((l) => l.view && l.view.containerEl).filter((el): el is HTMLElement => !!el); }
 
-  watch() {
+  watch(): void {
     for (const el of this.explorers()) {
       if (this.observers.has(el)) continue;
       const mo = new MutationObserver(() => this.requestApply());
@@ -53,11 +62,11 @@ export class FolderColors {
     }
   }
 
-  apply() {
+  apply(): void {
     const mode = this.plugin.settings.explorerColors;
     for (const root of this.explorers()) {
       root.toggleClass('cg-fc-rows', mode === 'rows');
-      root.querySelectorAll('.nav-folder-title[data-path]').forEach((title) => {
+      root.querySelectorAll<HTMLElement>('.nav-folder-title[data-path]').forEach((title) => {
         const item = title.parentElement; if (!item) return;
         const fp = title.getAttribute('data-path') || '';
         item.toggleClass('cg-fc-hidden', (this.plugin.settings.hiddenFolders || []).includes(fp));
@@ -68,19 +77,19 @@ export class FolderColors {
     }
   }
 
-  clear() {
+  clear(): void {
     for (const mo of this.observers.values()) mo.disconnect();
     this.observers.clear();
     for (const root of this.explorers()) {
       root.removeClass('cg-fc-rows');
-      root.querySelectorAll('.cg-fc').forEach((el) => { el.removeClass('cg-fc'); el.setCssProps({ '--cg-fc': '' }); });
-      root.querySelectorAll('.cg-fc-hidden').forEach((el) => el.removeClass('cg-fc-hidden'));
+      root.querySelectorAll<HTMLElement>('.cg-fc').forEach((el) => { el.removeClass('cg-fc'); el.setCssProps({ '--cg-fc': '' }); });
+      root.querySelectorAll<HTMLElement>('.cg-fc-hidden').forEach((el) => el.removeClass('cg-fc-hidden'));
     }
   }
 
-  get weights() { return this.plugin.settings.folderWeights || (this.plugin.settings.folderWeights = {}); }
+  get weights(): Record<string, number> { return this.plugin.settings.folderWeights || (this.plugin.settings.folderWeights = {}); }
 
-  async setStyle(folder, color, weight) {
+  async setStyle(folder: string, color: string | null, weight: number): Promise<void> {
     if (color) this.custom[folder] = color; else delete this.custom[folder];
     if (weight && weight !== 1) this.weights[folder] = weight; else delete this.weights[folder];
     await this.plugin.saveSettings();
@@ -88,14 +97,14 @@ export class FolderColors {
     this.plugin.refreshViews('data');
   }
 
-  async setColor(folder, color) {
+  async setColor(folder: string, color: string | null): Promise<void> {
     if (color) this.custom[folder] = color; else delete this.custom[folder];
     await this.plugin.saveSettings();
     this.apply();
     this.plugin.refreshViews('data');
   }
 
-  addMenu(menu, file) {
+  addMenu(menu: Menu, file: TAbstractFile): void {
     if (file instanceof TFile && file.extension === 'md') {
       menu.addItem((i) => i.setTitle(t('noteStyle')).setIcon('shapes').onClick(() => new NoteStyleModal(this.plugin, file.path).open()));
       return;
@@ -116,7 +125,8 @@ export class FolderColors {
 }
 
 class FolderColorModal extends Modal {
-  constructor(fc, path) { super(fc.app); this.fc = fc; this.path = path; }
+  fc: FolderColors; path: string;
+  constructor(fc: FolderColors, path: string) { super(fc.app); this.fc = fc; this.path = path; }
   onOpen() {
     const { contentEl } = this;
     this.titleEl.setText(t('folderColorTitle', this.path));
@@ -126,13 +136,13 @@ class FolderColorModal extends Modal {
     let shape = (this.fc.plugin.settings.folderShapes || {})[this.path] || '';
     contentEl.createDiv({ cls: 'setting-item-name', text: t('folderColorCustom') });
     const sw = contentEl.createDiv({ cls: 'cg-swatches' });
-    const mark = () => sw.querySelectorAll('.cg-swatch').forEach((b) => b.toggleClass('is-selected', b.getAttribute('data-c') === pick));
+    const mark = () => sw.querySelectorAll<HTMLElement>('.cg-swatch').forEach((b) => b.toggleClass('is-selected', b.getAttribute('data-c') === pick));
     for (const c of SWATCHES) {
       const b = sw.createEl('button', { cls: 'cg-swatch', attr: { 'data-c': c, 'aria-label': c } });
       b.setCssProps({ '--cg-sw': c });
-      b.onclick = () => { pick = c; custom = true; if (picker) picker.setValue(c); mark(); };
+      b.onclick = () => { pick = c; custom = true; if (picker !== undefined) picker.setValue(c); mark(); };
     }
-    let picker;
+    let picker: ColorComponent | undefined;
     new Setting(contentEl).setName(t('folderColorAny')).addColorPicker((cp) => { picker = cp; cp.setValue(pick).onChange((v) => { pick = v; custom = true; mark(); }); });
     mark();
     new Setting(contentEl).setName(t('folderWeight')).setDesc(t('folderWeightDesc')).addDropdown((d) => d
@@ -143,16 +153,17 @@ class FolderColorModal extends Modal {
       for (const k of ['kreis', 'ring', 'stern', 'raute', 'quadrat']) d.addOption(k, t('shape_' + k));
       d.setValue(shape).onChange((v) => { shape = v; });
     });
-    const saveShape = async (v) => { const m = this.fc.plugin.settings.folderShapes || (this.fc.plugin.settings.folderShapes = {}); if (v) m[this.path] = v; else delete m[this.path]; };
+    const saveShape = (v: string) => { const m = this.fc.plugin.settings.folderShapes || (this.fc.plugin.settings.folderShapes = {}); if (v) m[this.path] = v; else delete m[this.path]; };
     new Setting(contentEl)
-      .addButton((b) => b.setButtonText(t('reset')).onClick(async () => { await saveShape(''); await this.fc.setStyle(this.path, null, 1); this.close(); }))
-      .addButton((b) => b.setButtonText(t('apply')).setCta().onClick(async () => { await saveShape(shape); await this.fc.setStyle(this.path, custom ? pick : null, weight); this.close(); }));
+      .addButton((b) => b.setButtonText(t('reset')).onClick(async () => { saveShape(''); await this.fc.setStyle(this.path, null, 1); this.close(); }))
+      .addButton((b) => b.setButtonText(t('apply')).setCta().onClick(async () => { saveShape(shape); await this.fc.setStyle(this.path, custom ? pick : null, weight); this.close(); }));
   }
   onClose() { this.contentEl.empty(); }
 }
 
 class NoteStyleModal extends Modal {
-  constructor(plugin, path) { super(plugin.app); this.plugin = plugin; this.path = path; }
+  plugin: CortexGraphPlugin; path: string;
+  constructor(plugin: CortexGraphPlugin, path: string) { super(plugin.app); this.plugin = plugin; this.path = path; }
   onOpen() {
     const s = this.plugin.settings;
     const shapes = s.noteShapes || (s.noteShapes = {}), weights = s.noteWeights || (s.noteWeights = {});
@@ -166,7 +177,7 @@ class NoteStyleModal extends Modal {
     new Setting(this.contentEl).setName(t('folderWeight')).setDesc(t('noteWeightDesc')).addDropdown((d) => d
       .addOption('1', t('weightNormal')).addOption('1.6', t('weightImportant')).addOption('2.4', t('weightPrimary'))
       .setValue(String(weight)).onChange((v) => { weight = Number(v); }));
-    const save = async (sh, w) => {
+    const save = async (sh: string, w: number) => {
       if (sh) shapes[this.path] = sh; else delete shapes[this.path];
       if (w && w !== 1) weights[this.path] = w; else delete weights[this.path];
       await this.plugin.saveSettings();

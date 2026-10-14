@@ -4,22 +4,36 @@
                  groups (top-level folder index per node) are pulled to their own region (brain: lobes)
                  params {params} | pin {i,x,y,z} | unpin {i} | reheat {alpha} | stop
    Messages out: {pos:Float32Array, done:boolean} */
-let n = 0, dim = 3, x, y, z, vx, vy, vz, edges, m = 0, bias, str, groups = null, weights = null, levels = null;
-let P = { center: 0.5, repel: 10, link: 1, dist: 32 };
+interface SimParams { center: number; repel: number; link: number; dist: number; range?: number; shape?: string; shapeSize?: number; shapeGroup?: number; hubPull?: number; ngroups?: number }
+type InMsg =
+  | { cmd: 'init'; n: number; dim: number; edges: Int32Array; pos: Float32Array; groups?: Int32Array; weights?: Float32Array; levels?: Float32Array; params?: Partial<SimParams>; alpha: number }
+  | { cmd: 'params'; params: Partial<SimParams> }
+  | { cmd: 'pin'; i: number; x: number; y: number; z?: number }
+  | { cmd: 'unpin'; i: number }
+  | { cmd: 'reheat'; alpha?: number }
+  | { cmd: 'stop' };
+/* worker scope (kept minimal so the file type-checks with the DOM lib) */
+const ctx = self as unknown as { postMessage(msg: unknown, transfer: Transferable[]): void; onmessage: ((e: MessageEvent<InMsg>) => void) | null; setTimeout(fn: () => void, ms: number): number };
+type F64 = Float64Array;
+let n = 0, dim = 3, m = 0;
+let x: F64, y: F64, z: F64, vx: F64, vy: F64, vz: F64, bias: F64, str: F64;
+let edges: Int32Array;
+let groups: Int32Array | null = null, weights: Float32Array | null = null, levels: Float32Array | null = null;
+let P: SimParams = { center: 0.5, repel: 10, link: 1, dist: 32 };
 let alpha = 0, alphaTarget = 0, running = false;
-const pin = new Map();
+const pin = new Map<number, [number, number, number]>();
 const alphaMin = 0.004, alphaDecay = 1 - Math.pow(0.001, 1 / 280), DECAY = 0.58, THETA2 = 0.81;
 
 // ---------------------------------------------------------------- octree (flat typed arrays)
 let cap = 0, cells = 0;
-let child, body, mass, sx, sy, sz, size, ox, oy, oz;
-function alloc(c) {
+let child: Int32Array, body: Int32Array, mass: F64, sx: F64, sy: F64, sz: F64, size: F64, ox: F64, oy: F64, oz: F64;
+function alloc(c: number): void {
   cap = c;
   child = new Int32Array(cap * 8); body = new Int32Array(cap);
   mass = new Float64Array(cap); sx = new Float64Array(cap); sy = new Float64Array(cap); sz = new Float64Array(cap);
   size = new Float64Array(cap); ox = new Float64Array(cap); oy = new Float64Array(cap); oz = new Float64Array(cap);
 }
-function newCell(x0, y0, z0, s) {
+function newCell(x0: number, y0: number, z0: number, s: number): number {
   if (cells >= cap) {
     const o = { child, body, mass, sx, sy, sz, size, ox, oy, oz };
     alloc(cap * 2);
@@ -31,11 +45,11 @@ function newCell(x0, y0, z0, s) {
   ox[c] = x0; oy[c] = y0; oz[c] = z0; size[c] = s;
   return c;
 }
-function octant(c, i) {
+function octant(c: number, i: number): number {
   const h = size[c] / 2;
   return (x[i] >= ox[c] + h ? 1 : 0) | (y[i] >= oy[c] + h ? 2 : 0) | (dim === 3 && z[i] >= oz[c] + h ? 4 : 0);
 }
-function childFor(c, o) {
+function childFor(c: number, o: number): number {
   let k = child[c * 8 + o];
   if (k < 0) {
     const h = size[c] / 2;
@@ -44,8 +58,8 @@ function childFor(c, o) {
   }
   return k;
 }
-function addMass(c, i) { mass[c] += 1; sx[c] += x[i]; sy[c] += y[i]; sz[c] += z[i]; }
-function insert(i) {
+function addMass(c: number, i: number): void { mass[c] += 1; sx[c] += x[i]; sy[c] += y[i]; sz[c] += z[i]; }
+function insert(i: number): void {
   let c = 0, depth = 0;
   for (;;) {
     if (mass[c] === 0 && body[c] === -1) { body[c] = i; addMass(c, i); return; }
@@ -74,8 +88,8 @@ function buildTree() {
   newCell(x0, y0, dim === 3 ? z0 : 0, s);
   for (let i = 0; i < n; i++) insert(i);
 }
-const stack = [];
-function repel(CH, MAXD2) {
+const stack: number[] = [];
+function repel(CH: number, MAXD2: number): void {
   buildTree();
   const d3 = dim === 3;
   for (let i = 0; i < n; i++) {
@@ -114,7 +128,7 @@ const BRAIN = [
 ];
 // regions in order of folder size: frontal, parietal, temporal, occipital, cerebellum, brain stem, then in-between areas
 const LOBES = [[0.6, 0.25], [-0.15, 0.48], [0.28, -0.24], [-0.72, 0.15], [-0.66, -0.36], [-0.3, -0.62], [0.3, 0.5], [-0.45, 0.38], [0.5, 0.0], [-0.35, 0.05]];
-let R = 0, targets = [];
+let R = 0, targets: [number, number, number][] = [];
 function shapeSetup() {
   const d3 = dim === 3, sz = P.shapeSize || 1, DIST = P.dist || 32;
   R = (d3 ? 0.7 * DIST * Math.cbrt(Math.max(n, 8)) : 0.42 * DIST * Math.sqrt(Math.max(n, 8))) * sz;
@@ -134,7 +148,7 @@ function shapeSetup() {
   }
 }
 /* nearest point inside the form, or null when the point is already inside */
-function inside(px, py, pz) {
+function inside(px: number, py: number, pz: number): [number, number, number] | null {
   const d3 = dim === 3, sh = P.shape;
   if (sh === 'circle') {
     const l = Math.sqrt(px * px + py * py + (d3 ? pz * pz : 0));
@@ -157,7 +171,7 @@ function inside(px, py, pz) {
     return out ? [qx, cy, qz] : null;
   }
   if (sh === 'brain') {
-    let best = null, bd = Infinity;
+    let best: [number, number, number] | null = null, bd = Infinity;
     for (const b of BRAIN) {
       // optional flat cut on the underside, then project onto the ellipsoid
       const cut = b[6] != null ? b[6] * R : -Infinity;
@@ -166,7 +180,7 @@ function inside(px, py, pz) {
       const q = Math.sqrt((dx / (b[3] * R)) ** 2 + (dy / (b[4] * R)) ** 2 + (d3 ? (dz / (b[5] * R)) ** 2 : 0));
       if (q <= 1 && qy0 === py) return null;
       const s1 = q > 1 ? 1 / q : 1;
-      const c = [b[0] * R + dx * s1, Math.max(cut, b[1] * R + dy * s1), d3 ? b[2] * R + dz * s1 : 0];
+      const c: [number, number, number] = [b[0] * R + dx * s1, Math.max(cut, b[1] * R + dy * s1), d3 ? b[2] * R + dz * s1 : 0];
       const dd = (c[0] - px) ** 2 + (c[1] - py) ** 2 + (c[2] - pz) ** 2;
       if (dd < bd) { bd = dd; best = c; }
     }
@@ -228,10 +242,10 @@ function step() {
   }
   for (const [i, p] of pin) { x[i] = p[0]; y[i] = p[1]; z[i] = d3 ? p[2] : 0; vx[i] = vy[i] = vz[i] = 0; }
 }
-function send(done) {
+function send(done: boolean): void {
   const out = new Float32Array(3 * n);
   for (let i = 0; i < n; i++) { out[3 * i] = x[i]; out[3 * i + 1] = y[i]; out[3 * i + 2] = z[i]; }
-  self.postMessage({ pos: out, done }, [out.buffer]);
+  ctx.postMessage({ pos: out, done }, [out.buffer]);
 }
 function loop() {
   if (!running) return;
@@ -243,10 +257,10 @@ function loop() {
   const done = alpha < alphaMin && alphaTarget === 0 && pin.size === 0;
   send(done);
   if (done) { running = false; return; }
-  setTimeout(loop, 12);
+  ctx.setTimeout(loop, 12);
 }
-function kick(a) { alpha = Math.max(alpha, a); if (!running && n > 0) { running = true; loop(); } }
-self.onmessage = (e) => {
+function kick(a: number): void { alpha = Math.max(alpha, a); if (!running && n > 0) { running = true; loop(); } }
+ctx.onmessage = (e) => {
   const d = e.data;
   if (d.cmd === 'init') {
     n = d.n; dim = d.dim; edges = d.edges; m = edges.length / 2;
@@ -261,3 +275,5 @@ self.onmessage = (e) => {
   else if (d.cmd === 'reheat') { kick(d.alpha || 0.5); }
   else if (d.cmd === 'stop') { running = false; }
 };
+
+export {};
