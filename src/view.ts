@@ -419,11 +419,31 @@ export class CortexGraphView extends ItemView {
       row.createSpan({ cls: 'cg-dot' }).setCssStyles({ background: PROBLEM_COLORS[kind as keyof typeof PROBLEM_COLORS] });
       row.createSpan({ text: t(kind) + ' ' });
       row.createEl('b', { text: String((this.G.stats as Partial<Record<string, number>>)[kind] || 0) });
+      this.legendHover(row, () => this.kindSet(kind));
     }
     const row = this.legend.createDiv({ cls: 'cg-legend-row' });
+    this.legendHover(row, () => {
+      const set = new Set<number>();
+      for (const x of this.suggestions || []) for (const p of [x.from, x.to]) { const k = this.G.idx.get(p); if (k != null) set.add(k); }
+      return set;
+    });
     row.createSpan({ cls: 'cg-dash' });
     row.createSpan({ text: t('suggestions') + ' ' });
     this.sugCount = row.createEl('b', { text: this.suggestions ? String(this.suggestions.length) : '…' });
+  }
+
+  /* nodes of one problem kind (orphan, deadEnd, unresolved) that are actually drawn */
+  kindSet(kind: string): Set<number> {
+    const set = new Set<number>();
+    this.G.nodes.forEach((nd, k) => { if (nd.kind === kind && !nd.hidden && !nd.anchor) set.add(k); });
+    return set;
+  }
+
+  /* hovering a legend row lights up its nodes, leaving restores the previous highlight */
+  legendHover(row: HTMLElement, nodes: () => Set<number>): void {
+    row.addClass('is-hoverable');
+    row.addEventListener('pointerenter', () => { if (this.R) this.R.setHighlight(nodes()); });
+    row.addEventListener('pointerleave', () => { if (this.R) this.R.setHighlight(this.reviewSet || null); });
   }
 
   onActivity(path: string, op: string): void {

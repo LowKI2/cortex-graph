@@ -48,6 +48,8 @@
 .cg-legend { position: absolute; left: 8px; top: 48px; border-radius: 10px; padding: 6px 10px; font-size: var(--font-ui-small); z-index: 2; }
 .cg-legend-row { display: flex; align-items: center; gap: 7px; padding: 2px 0; }
 .cg-legend-row b { margin-left: auto; padding-left: 10px; }
+.cg-legend-row.is-hoverable { cursor: default; border-radius: 6px; margin: 0 -4px; padding: 2px 4px; }
+.cg-legend-row.is-hoverable:hover { background: var(--background-modifier-hover); }
 
 /* navigation buttons */
 .cg-nav { position: absolute; right: 8px; bottom: calc(34px + var(--cg-sheet-h, 0px)); display: flex; flex-direction: column; align-items: flex-end; gap: 6px; z-index: 3; user-select: none; }
