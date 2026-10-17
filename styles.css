@@ -146,7 +146,7 @@
 
 /* hidden folders in the explorer */
 .cg-fc-hidden > .nav-folder-title { opacity: .55; }
-.cg-fc-hidden > .nav-folder-title .nav-folder-title-content { text-decoration-line: line-through; opacity: .7; }
+.cg-fc-hidden > .nav-folder-title .nav-folder-title-content { font-style: italic; }
 
 /* Folder galaxy label */
 .cg-galaxy-label { position: absolute; left: 0; top: 0; pointer-events: none; white-space: nowrap; font-size: 18px; font-weight: 700; letter-spacing: .06em;
