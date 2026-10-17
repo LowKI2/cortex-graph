@@ -1,7 +1,7 @@
 {
   "id": "cortex-graph",
   "name": "Cortex Graph",
-  "version": "3.4.0",
+  "version": "3.5.0",
   "minAppVersion": "1.4.0",
   "description": "3D graph with glowing nodes: live updates, time lapse with video export, folder colors in the explorer, link suggestions, base forms like sphere, pyramid or brain, activity heat, shortest paths and touch controls.",
   "author": "BZi Studio",

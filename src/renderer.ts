@@ -73,7 +73,7 @@ export class GraphRenderer {
   target: Vector3; targetGoal: Vector3;
   yaw = 0.6; pitch = 0.35; dist = 900; distGoal = 900; lastInteract = 0; userMoved = false;
   labelPool: LabelEl[] = []; labelTick = 0; tmpV: Vector3;
-  light = false; t0 = 0; clockT = 0; raf = 0; disposed = false;
+  light = false; accent = '#a882ff'; spaceBg = '#07070d'; t0 = 0; clockT = 0; raf = 0; disposed = false;
   flashes = new Map<number, Flash>(); flashLabel: { k: number; until: number } | null = null;
   galaxy: Galaxy | null = null; galaxyMat: SpriteMaterial | null = null; galaxySprite: Sprite | null = null; galaxyLabel: HTMLDivElement | null = null;
   mask: Set<number> | null = null; hl: Set<number> | null = null;
@@ -224,11 +224,13 @@ export class GraphRenderer {
     this.scene.add(this.stars);
   }
 
-  /* theme: {space:boolean, bg:'#rrggbb', light:boolean} */
-  setTheme(th: { space?: boolean; bg?: string; light?: boolean }): void {
+  /* theme: {space, bg:'#rrggbb', light, accent/spaceBg: optional colors from the Cortex theme} */
+  setTheme(th: { space?: boolean; bg?: string; light?: boolean; accent?: string; spaceBg?: string }): void {
     if (!this.active) return;
+    this.accent = th.accent || '#a882ff';
+    this.spaceBg = th.spaceBg || '#07070d';
     const space = th.space !== false;
-    const bg = space ? '#07070d' : (th.bg || '#1e1e1e');
+    const bg = space ? this.spaceBg : (th.bg || '#1e1e1e');
     this.light = !space && !!th.light;
     this.renderer.setClearColor(new Color(bg), 1);
     this.scene.fog = new FogExp2(new Color(bg).getHex(), space ? 0.0009 : 0.0004);
@@ -323,10 +325,10 @@ export class GraphRenderer {
       this.galaxyLabel = this.labelLayer.createDiv({ cls: 'cg-galaxy-label' }); this.galaxyLabel.toggle(false);
     }
     if (this.galaxy) {
-      this.galaxyMat.color.set(this.galaxy.color || '#a882ff');
+      this.galaxyMat.color.set(this.galaxy.color || this.accent);
       this.galaxyMat.blending = this.light ? NormalBlending : AdditiveBlending; this.galaxyMat.needsUpdate = true;
       this.galaxyLabel.setText(this.galaxy.name || '');
-      this.galaxyLabel.setCssProps({ '--cg-gal': this.galaxy.color || '#a882ff' });
+      this.galaxyLabel.setCssProps({ '--cg-gal': this.galaxy.color || this.accent });
     }
   }
 
@@ -857,7 +859,7 @@ export class GraphRenderer {
         ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(d.x * dpr - tw / 2 - 5 * dpr, d.y * dpr - 1 * dpr, tw + 10 * dpr, h, h / 2); else ctx.rect(d.x * dpr - tw / 2 - 5 * dpr, d.y * dpr - 1 * dpr, tw + 10 * dpr, h);
         ctx.fill(); ctx.globalAlpha = 1;
       }
-      ctx.shadowColor = ls === 'shadow' && d.c ? d.c : ls === 'none' || ls === 'pill' ? 'rgba(0,0,0,.8)' : (light ? 'rgba(255,255,255,.9)' : 'rgba(168,130,255,.9)');
+      ctx.shadowColor = ls === 'shadow' && d.c ? d.c : ls === 'none' || ls === 'pill' ? 'rgba(0,0,0,.8)' : (light ? 'rgba(255,255,255,.9)' : this.accent);
       ctx.shadowBlur = (ls === 'none' || ls === 'pill' ? 2 : 6) * dpr;
       ctx.fillStyle = light ? '#222' : (d.prio ? '#fff' : '#e8e6ff');
       ctx.fillText(d.txt, d.x * dpr, d.y * dpr);

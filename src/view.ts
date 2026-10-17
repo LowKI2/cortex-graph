@@ -231,7 +231,11 @@ export class CortexGraphView extends ItemView {
     const light = document.body.hasClass('theme-light');
     const space = this.plugin.settings.background !== 'theme';
     this.rootEl.toggleClass('is-space', space);
-    this.R.setTheme({ space, bg: toHex(bg), light });
+    // colors published by the Cortex theme (empty without it)
+    const css = getComputedStyle(document.body);
+    const accent = css.getPropertyValue('--cortex-accent').trim();
+    const spaceBg = css.getPropertyValue('--cortex-space-bg').trim();
+    this.R.setTheme({ space, bg: toHex(bg), light, accent: accent ? toHex(accent) : '', spaceBg: spaceBg ? toHex(spaceBg) : '' });
   }
 
   // ============================================================ data
