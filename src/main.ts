@@ -1,4 +1,4 @@
-import { App, Debouncer, Plugin, PluginSettingTab, Setting, FuzzySuggestModal, Modal, Notice, TAbstractFile, TFolder, TFile, FileSystemAdapter, debounce, getAllTags } from 'obsidian';
+import { App, Debouncer, SettingDefinitionItem, Plugin, PluginSettingTab, Setting, FuzzySuggestModal, Modal, Notice, TAbstractFile, TFolder, TFile, FileSystemAdapter, debounce, getAllTags } from 'obsidian';
 import type { CGSettings, GraphCfg, Note, StyleSettings, ThemeOptions } from './types';
 
 const HOOK_URL = 'https://github.com/LowKI2/cortex-graph/blob/main/tools/cortex-activity-hook.mjs';
@@ -258,74 +258,100 @@ class NotePicker extends FuzzySuggestModal<TFile> {
   onChooseItem(f: TFile): void { void this.onPick(f); }
 }
 
+/* collects settings once, for the declarative API (search) and the classic display() */
+interface SettingRow { name: string; desc: string; render: (st: Setting) => void }
+class SettingDefs {
+  groups: { heading: string; rows: SettingRow[] }[] = [];
+  heading(name: string): void { this.groups.push({ heading: name, rows: [] }); }
+  row(name: string, desc: string, render: (st: Setting) => void): void {
+    if (!this.groups.length) this.groups.push({ heading: '', rows: [] });
+    this.groups[this.groups.length - 1].rows.push({ name, desc, render });
+  }
+  get items(): SettingDefinitionItem[] {
+    return this.groups.map((g): SettingDefinitionItem => ({
+      type: 'group', heading: g.heading || undefined,
+      items: g.rows.map((r) => ({ name: r.name, desc: r.desc || undefined, render: (st: Setting) => { r.render(st); } })),
+    }));
+  }
+}
+
 class CortexGraphSettingTab extends PluginSettingTab {
   plugin: CortexGraphPlugin;
   constructor(app: App, plugin: CortexGraphPlugin) { super(app, plugin); this.plugin = plugin; }
+  /* Obsidian 1.13+: declarative definitions (rendered by Obsidian, found by the settings search) */
+  getSettingDefinitions(): SettingDefinitionItem[] { return this.buildDefs().items; }
+  /* older Obsidian versions: render the same definitions by hand */
   display(): void {
-    const el = this.containerEl, s = this.plugin.settings, p = this.plugin;
+    const el = this.containerEl;
     el.empty();
+    for (const g of this.buildDefs().groups) {
+      if (g.heading) new Setting(el).setName(g.heading).setHeading();
+      for (const r of g.rows) { const st = new Setting(el).setName(r.name); if (r.desc) st.setDesc(r.desc); r.render(st); }
+    }
+  }
+  buildDefs(): SettingDefs {
+    const s = this.plugin.settings, p = this.plugin, D = new SettingDefs();
     const save = (what: string) => { void p.saveSettings(); p.refreshViews(what); };
-    new Setting(el).setName(t('sDisplay')).setHeading();
-    new Setting(el).setName(t('sLayout')).setDesc(t('sLayoutDesc')).addDropdown((d) => d
+    D.heading(t('sDisplay'));
+    D.row(t('sLayout'), t('sLayoutDesc'), (st) => { st.addDropdown((d) => d
       .addOption('3d', t('s3d')).addOption('flat', t('sFlat')).setValue(s.layout)
-      .onChange((v) => { s.layout = v; save('layout'); }));
-    new Setting(el).setName(t('sBackground')).setDesc(t('sBackgroundDesc')).addDropdown((d) => d
+      .onChange((v) => { s.layout = v; save('layout'); })); });
+    D.row(t('sBackground'), t('sBackgroundDesc'), (st) => { st.addDropdown((d) => d
       .addOption('space', t('sSpace')).addOption('theme', t('sTheme')).setValue(s.background)
-      .onChange((v) => { s.background = v; save('theme'); }));
-    new Setting(el).setName(t('sColorBy')).setDesc(t('sColorByDesc')).addDropdown((d) => d
+      .onChange((v) => { s.background = v; save('theme'); })); });
+    D.row(t('sColorBy'), t('sColorByDesc'), (st) => { st.addDropdown((d) => d
       .addOption('obsidian', t('sColorObsidian')).addOption('folder', t('sColorFolder')).addOption('none', t('sColorNone')).setValue(s.colorBy)
-      .onChange((v) => { s.colorBy = v; save('data'); void p.fc.refresh(); }));
-    new Setting(el).setName(t('sExplorer')).setDesc(t('sExplorerDesc')).addDropdown((d) => d
+      .onChange((v) => { s.colorBy = v; save('data'); void p.fc.refresh(); })); });
+    D.row(t('sExplorer'), t('sExplorerDesc'), (st) => { st.addDropdown((d) => d
       .addOption('rows', t('sExplorerRows')).addOption('folders', t('sExplorerFolders')).addOption('off', t('sExplorerOff')).setValue(s.explorerColors)
-      .onChange((v) => { s.explorerColors = v; void p.saveSettings(); p.fc.apply(); }));
-    new Setting(el).setName(t('sFilters')).setDesc(t('sFiltersDesc')).addToggle((tg) => tg.setValue(s.filters).onChange((v) => { s.filters = v; save('data'); }));
-    new Setting(el).setName(t('sRankBy')).setDesc(t('sRankByDesc')).addDropdown((d) => d
+      .onChange((v) => { s.explorerColors = v; void p.saveSettings(); p.fc.apply(); })); });
+    D.row(t('sFilters'), t('sFiltersDesc'), (st) => { st.addToggle((tg) => tg.setValue(s.filters).onChange((v) => { s.filters = v; save('data'); })); });
+    D.row(t('sRankBy'), t('sRankByDesc'), (st) => { st.addDropdown((d) => d
       .addOption('auto', t('sRankAuto')).addOption('links', t('sRankLinks')).setValue(s.rankBy)
-      .onChange((v) => { s.rankBy = v; save('data'); }));
-    new Setting(el).setName(t('sFolderLinks')).setDesc(t('sFolderLinksDesc')).addDropdown((d) => d
+      .onChange((v) => { s.rankBy = v; save('data'); })); });
+    D.row(t('sFolderLinks'), t('sFolderLinksDesc'), (st) => { st.addDropdown((d) => d
       .addOption('off', t('sFlOff')).addOption('hidden', t('sFlHidden')).addOption('lines', t('sFlLines')).setValue(s.folderLinks)
-      .onChange((v) => { s.folderLinks = v; save('layout'); }));
-    new Setting(el).setName(t('sGalaxies')).setDesc(t('sGalaxiesDesc')).addToggle((tg) => tg.setValue(s.galaxies !== false).onChange((v) => { s.galaxies = v; void p.saveSettings(); }));
-    new Setting(el).setName(t('sOrphans')).addToggle((tg) => tg.setValue(s.orphans).onChange((v) => { s.orphans = v; save('data'); }));
-    new Setting(el).setName(t('sLabels')).addToggle((tg) => tg.setValue(s.labels).onChange((v) => { s.labels = v; save('style'); p.views().forEach((w) => w.updateToolbar()); }));
-    new Setting(el).setName(t('sRotate')).addToggle((tg) => tg.setValue(s.rotate).onChange((v) => { s.rotate = v; save('style'); }));
-    new Setting(el).setName(t('sShapeDefault')).setDesc(t('sShapeDesc')).addDropdown((d) => { for (const k of SHAPES) d.addOption(k, t('shape_' + k)); d.setValue(s.shapeDefault).onChange((v) => { s.shapeDefault = v; save('data'); }); });
-    new Setting(el).setName(t('autoShapes')).setDesc(t('autoShapesDesc')).addToggle((tg) => tg.setValue(s.hubStars).onChange((v) => { s.hubStars = v; save('data'); }));
-    new Setting(el).setName(t('sStale')).setDesc(t('sStaleDesc')).addSlider((sl) => sl.setLimits(0, 365, 5).setValue(s.staleDays).setDynamicTooltip()
-      .onChange((v) => { s.staleDays = v; save('heat'); }));
-    new Setting(el).setName(t('sThemeHead')).setDesc(p.themeActive() ? t('sThemeDesc') : t('sThemeDesc') + ' ' + t('sThemeInactive')).setHeading();
+      .onChange((v) => { s.folderLinks = v; save('layout'); })); });
+    D.row(t('sGalaxies'), t('sGalaxiesDesc'), (st) => { st.addToggle((tg) => tg.setValue(s.galaxies !== false).onChange((v) => { s.galaxies = v; void p.saveSettings(); })); });
+    D.row(t('sOrphans'), '', (st) => { st.addToggle((tg) => tg.setValue(s.orphans).onChange((v) => { s.orphans = v; save('data'); })); });
+    D.row(t('sLabels'), '', (st) => { st.addToggle((tg) => tg.setValue(s.labels).onChange((v) => { s.labels = v; save('style'); p.views().forEach((w) => w.updateToolbar()); })); });
+    D.row(t('sRotate'), '', (st) => { st.addToggle((tg) => tg.setValue(s.rotate).onChange((v) => { s.rotate = v; save('style'); })); });
+    D.row(t('sShapeDefault'), t('sShapeDesc'), (st) => { st.addDropdown((d) => { for (const k of SHAPES) d.addOption(k, t('shape_' + k)); d.setValue(s.shapeDefault).onChange((v) => { s.shapeDefault = v; save('data'); }); }); });
+    D.row(t('autoShapes'), t('autoShapesDesc'), (st) => { st.addToggle((tg) => tg.setValue(s.hubStars).onChange((v) => { s.hubStars = v; save('data'); })); });
+    D.row(t('sStale'), t('sStaleDesc'), (st) => { st.addSlider((sl) => sl.setLimits(0, 365, 5).setValue(s.staleDays)
+      .onChange((v) => { s.staleDays = v; save('heat'); })); });
+    D.heading(t('sThemeHead'));
     const th = s.themeOpts;
     const thSave = () => { void p.saveSettings(); p.applyThemeOptions(); };
-    new Setting(el).setName(t('sThemeColor')).setDesc(t('sThemeColorDesc')).addDropdown((d) => {
+    D.row(t('sThemeColor'), t('sThemeColorDesc') + ' ' + t('sThemeDesc') + (p.themeActive() ? '' : ' ' + t('sThemeInactive')), (st) => { st.addDropdown((d) => {
       for (const c of THEME_COLORS) d.addOption(c, t('tc_' + c));
       d.setValue(th.color).onChange((v) => { th.color = v; thSave(); });
-    });
-    new Setting(el).setName(t('sThemeTextFont')).addDropdown((d) => d.addOption('inter', t('tf_inter')).addOption('system', t('tf_system'))
-      .setValue(th.textFont).onChange((v) => { th.textFont = v; thSave(); }));
-    new Setting(el).setName(t('sThemeHeadFont')).addDropdown((d) => d.addOption('grotesk', t('hf_grotesk')).addOption('text', t('hf_text'))
-      .setValue(th.headFont).onChange((v) => { th.headFont = v; thSave(); }));
-    const tog = (name: string, key: 'stars' | 'starsMotion' | 'nebula' | 'headingGlow' | 'gradient' | 'checkboxes', desc?: string) => {
-      const st = new Setting(el).setName(t(name)).addToggle((tg) => tg.setValue(th[key]).onChange((v) => { th[key] = v; thSave(); }));
-      if (desc) st.setDesc(t(desc));
-    };
+    }); });
+    D.row(t('sThemeTextFont'), '', (st) => { st.addDropdown((d) => d.addOption('inter', t('tf_inter')).addOption('system', t('tf_system'))
+      .setValue(th.textFont).onChange((v) => { th.textFont = v; thSave(); })); });
+    D.row(t('sThemeHeadFont'), '', (st) => { st.addDropdown((d) => d.addOption('grotesk', t('hf_grotesk')).addOption('text', t('hf_text'))
+      .setValue(th.headFont).onChange((v) => { th.headFont = v; thSave(); })); });
+    const tog = (name: string, key: 'stars' | 'starsMotion' | 'nebula' | 'headingGlow' | 'gradient' | 'checkboxes', desc?: string) =>
+      D.row(t(name), desc ? t(desc) : '', (st) => { st.addToggle((tg) => tg.setValue(th[key]).onChange((v) => { th[key] = v; thSave(); })); });
     tog('sThemeStars', 'stars', 'sThemeStarsDesc');
     tog('sThemeMotion', 'starsMotion');
     tog('sThemeNebula', 'nebula');
     tog('sThemeGlow', 'headingGlow');
     tog('sThemeGradient', 'gradient');
     tog('sThemeChecks', 'checkboxes', 'sThemeChecksDesc');
-    new Setting(el).setName(t('sBehavior')).setHeading();
-    new Setting(el).setName(t('sFocusCam')).setDesc(t('sFocusCamDesc')).addToggle((tg) => tg.setValue(s.focusCamera).onChange((v) => { s.focusCamera = v; void p.saveSettings(); }));
-    new Setting(el).setName(t('sClaudeLive')).setDesc(t('sClaudeLiveDesc')).addToggle((tg) => tg.setValue(s.claudeLive).onChange((v) => { s.claudeLive = v; void p.saveSettings(); }));
-    new Setting(el).setName(t('sHook')).setDesc(t('sHookDesc')).addButton((b) => b.setButtonText(t('sHookBtn')).onClick(() => new HookModal(this.app).open()));
-    new Setting(el).setName(t('sRecSave')).addDropdown((d) => d
+    D.heading(t('sBehavior'));
+    D.row(t('sFocusCam'), t('sFocusCamDesc'), (st) => { st.addToggle((tg) => tg.setValue(s.focusCamera).onChange((v) => { s.focusCamera = v; void p.saveSettings(); })); });
+    D.row(t('sClaudeLive'), t('sClaudeLiveDesc'), (st) => { st.addToggle((tg) => tg.setValue(s.claudeLive).onChange((v) => { s.claudeLive = v; void p.saveSettings(); })); });
+    D.row(t('sHook'), t('sHookDesc'), (st) => { st.addButton((b) => b.setButtonText(t('sHookBtn')).onClick(() => new HookModal(this.app).open())); });
+    D.row(t('sRecSave'), '', (st) => { st.addDropdown((d) => d
       .addOption('ask', t('sRecAsk')).addOption('auto', t('sRecAuto')).setValue(s.recSave)
-      .onChange((v) => { s.recSave = v; void p.saveSettings(); }));
-    new Setting(el).setName(t('sClick')).setDesc(t('sClickDesc')).addToggle((tg) => tg.setValue(s.clickOpens).onChange((v) => { s.clickOpens = v; void p.saveSettings(); }));
-    new Setting(el).setName(t('sHalf')).setDesc(t('sHalfDesc')).addSlider((sl) => sl.setLimits(1, 720, 1).setValue(s.halfLife).setDynamicTooltip()
-      .onChange((v) => { s.halfLife = v; save('heat'); }));
-    new Setting(el).setName(t('sDepth')).addSlider((sl) => sl.setLimits(1, 3, 1).setValue(s.depth).setDynamicTooltip()
-      .onChange((v) => { s.depth = v; void p.saveSettings(); }));
+      .onChange((v) => { s.recSave = v; void p.saveSettings(); })); });
+    D.row(t('sClick'), t('sClickDesc'), (st) => { st.addToggle((tg) => tg.setValue(s.clickOpens).onChange((v) => { s.clickOpens = v; void p.saveSettings(); })); });
+    D.row(t('sHalf'), t('sHalfDesc'), (st) => { st.addSlider((sl) => sl.setLimits(1, 720, 1).setValue(s.halfLife)
+      .onChange((v) => { s.halfLife = v; save('heat'); })); });
+    D.row(t('sDepth'), '', (st) => { st.addSlider((sl) => sl.setLimits(1, 3, 1).setValue(s.depth)
+      .onChange((v) => { s.depth = v; void p.saveSettings(); })); });
+    return D;
   }
 }
 

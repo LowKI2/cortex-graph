@@ -1406,7 +1406,7 @@ class RecordingModal extends Modal {
     new Setting(contentEl).setName(t('recName')).addText((tx) => tx.setValue(name).onChange((v) => { name = v; }));
     const fix = () => { const ext = this.name.slice(this.name.lastIndexOf('.')); return name.endsWith(ext) ? name : name + ext; };
     new Setting(contentEl)
-      .addButton((b) => b.setButtonText(t('recDiscard')).setWarning().onClick(() => this.close()))
+      .addButton((b) => { b.buttonEl.addClass('mod-warning'); b.setButtonText(t('recDiscard')).onClick(() => this.close()); })
       .addButton((b) => b.setButtonText(t('recToVault')).onClick(async () => { await this.view.saveToVault(this.blob, fix(), true); this.close(); }))
       .addButton((b) => b.setButtonText(t('recSaveAs')).setCta().onClick(() => {
         const a = createEl('a'); a.href = this.url; a.download = fix(); document.body.appendChild(a); a.click(); a.remove();
