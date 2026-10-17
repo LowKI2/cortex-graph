@@ -85,4 +85,11 @@ export interface CGSettings {
   views: SavedView[]; style: StyleSettings; styleRev?: number;
   keys: Record<string, string[]>; mouse: MouseSettings; panelTab?: number;
   labelFont?: string; labelStyle?: string;
+  themeOpts: ThemeOptions;
+}
+
+/* options for the Cortex theme, applied as classes on <body> */
+export interface ThemeOptions {
+  color: string; textFont: string; headFont: string;
+  stars: boolean; starsMotion: boolean; nebula: boolean; headingGlow: boolean; gradient: boolean; checkboxes: boolean;
 }

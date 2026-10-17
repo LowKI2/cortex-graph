@@ -1,5 +1,5 @@
 import { App, Debouncer, Plugin, PluginSettingTab, Setting, FuzzySuggestModal, Modal, Notice, TAbstractFile, TFolder, TFile, FileSystemAdapter, debounce, getAllTags } from 'obsidian';
-import type { CGSettings, GraphCfg, Note, StyleSettings } from './types';
+import type { CGSettings, GraphCfg, Note, StyleSettings, ThemeOptions } from './types';
 
 const HOOK_URL = 'https://github.com/LowKI2/cortex-graph/blob/main/tools/cortex-activity-hook.mjs';
 const vaultBase = (app: App): string => (app.vault.adapter instanceof FileSystemAdapter ? app.vault.adapter.getBasePath() : '').replace(/\\/g, '/');
@@ -11,9 +11,14 @@ import { t } from './i18n';
 export const SHAPES = ['kreis', 'ring', 'stern', 'raute', 'quadrat'];
 const STYLE_DEFAULTS: StyleSettings = { shapeSize: 1, shapeGroup: 0.4, hubPull: 0.5, center: 2.25, repel: 5.6, link: 0.09, dist: 8, range: 120, nodeSize: 0.35, degSize: 0.75, glow: 1.3, line: 0.7,
   font: 3, fontGrow: 1.05, boldFrom: 28, labelFrom: 3, maxLabels: 80, dimOthers: 0.1, nodeBright: 0.55, glowBright: 1, shStern: 0, shRaute: 0, shQuadrat: 0, shRing: 0.5 };
+export const THEME_DEFAULTS: ThemeOptions = { color: 'violet', textFont: 'inter', headFont: 'grotesk', stars: true, starsMotion: false, nebula: true, headingGlow: true, gradient: true, checkboxes: true };
+const THEME_COLORS = ['violet', 'cyan', 'amber', 'emerald'];
+/* every body class the Cortex theme reacts to */
+const THEME_CLASSES = [...THEME_COLORS.map((c) => 'cortex-' + c), 'cortex-font-system', 'cortex-headings-text', 'cortex-no-stars', 'cortex-stars-motion',
+  'cortex-no-nebula', 'cortex-no-heading-glow', 'cortex-no-rainbow-headings', 'cortex-no-alt-checkboxes'];
 const DEFAULTS: CGSettings = {
   layout: '3d', shape: 'free', background: 'space', colorBy: 'obsidian', filters: true, orphans: false, labels: true, rotate: true,
-  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], folderLinks: 'hidden', rankBy: 'auto', recSave: 'ask', focusCamera: true, staleDays: 90, shapeDefault: 'kreis', hubStars: false, folderShapes: {}, noteShapes: {}, noteWeights: {}, claudeLive: true, galaxies: true, views: [], style: Object.assign({}, STYLE_DEFAULTS), keys: {}, mouse: Object.assign({}, DEFAULT_MOUSE),
+  clickOpens: false, activity: true, halfLife: 24, depth: 1, navMini: false, explorerColors: 'rows', folderColors: {}, folderWeights: {}, hiddenFolders: [], folderLinks: 'hidden', rankBy: 'auto', recSave: 'ask', focusCamera: true, staleDays: 90, shapeDefault: 'kreis', hubStars: false, folderShapes: {}, noteShapes: {}, noteWeights: {}, claudeLive: true, galaxies: true, views: [], style: Object.assign({}, STYLE_DEFAULTS), keys: {}, mouse: Object.assign({}, DEFAULT_MOUSE), themeOpts: Object.assign({}, THEME_DEFAULTS),
 };
 
 type PositionMap = Record<string, number[]>;
@@ -32,6 +37,7 @@ export default class CortexGraphPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
     this.saveSettingsDebounced = debounce(() => { void this.saveSettings(); }, 400, true);
+    this.applyThemeOptions();
     this.registerView(VIEW_TYPE, (leaf) => new CortexGraphView(leaf, this));
     this.registerHoverLinkSource(VIEW_TYPE, { display: 'Cortex Graph', defaultMod: true });
     this.addRibbonIcon('orbit', t('cmdOpen'), () => { void this.openGraph('global'); });
@@ -147,6 +153,7 @@ export default class CortexGraphPlugin extends Plugin {
 
   onunload(): void {
     if (this.fc) this.fc.clear();
+    document.body.removeClasses(THEME_CLASSES);
     try { delete (window as unknown as { __THREE__?: string }).__THREE__; } catch { /* ignore */ }
   }
 
@@ -168,8 +175,26 @@ export default class CortexGraphPlugin extends Plugin {
     this.settings.keys = {};
     for (const a of KEY_ACTIONS) this.settings.keys[a] = (d.keys && Array.isArray(d.keys[a]) ? d.keys[a] : DEFAULT_KEYS[a]).slice(0, 2);
     this.settings.mouse = Object.assign({}, DEFAULT_MOUSE, d.mouse || {});
+    this.settings.themeOpts = Object.assign({}, THEME_DEFAULTS, d.themeOpts || {});
     if (migrate) await this.saveData(this.settings);
   }
+  /* Cortex theme options: classes on <body>, the theme's CSS does the rest */
+  applyThemeOptions(): void {
+    const o = this.settings.themeOpts, b = document.body;
+    b.removeClasses(THEME_CLASSES);
+    b.addClass('cortex-' + (THEME_COLORS.includes(o.color) ? o.color : 'violet'));
+    if (o.textFont === 'system') b.addClass('cortex-font-system');
+    if (o.headFont === 'text') b.addClass('cortex-headings-text');
+    if (!o.stars) b.addClass('cortex-no-stars');
+    if (o.starsMotion) b.addClass('cortex-stars-motion');
+    if (!o.nebula) b.addClass('cortex-no-nebula');
+    if (!o.headingGlow) b.addClass('cortex-no-heading-glow');
+    if (!o.gradient) b.addClass('cortex-no-rainbow-headings');
+    if (!o.checkboxes) b.addClass('cortex-no-alt-checkboxes');
+    this.refreshViews('theme');
+  }
+  themeActive(): boolean { return getComputedStyle(document.body).getPropertyValue('--cortex-accent').trim() !== ''; }
+
   async saveSettings(): Promise<void> { await this.saveData(this.settings); }
   resetStyle(): void {
     this.settings.style = Object.assign({}, STYLE_DEFAULTS);
@@ -239,7 +264,7 @@ class CortexGraphSettingTab extends PluginSettingTab {
   display(): void {
     const el = this.containerEl, s = this.plugin.settings, p = this.plugin;
     el.empty();
-    const save = (what: string) => { void void p.saveSettings(); p.refreshViews(what); };
+    const save = (what: string) => { void p.saveSettings(); p.refreshViews(what); };
     new Setting(el).setName(t('sDisplay')).setHeading();
     new Setting(el).setName(t('sLayout')).setDesc(t('sLayoutDesc')).addDropdown((d) => d
       .addOption('3d', t('s3d')).addOption('flat', t('sFlat')).setValue(s.layout)
@@ -268,6 +293,27 @@ class CortexGraphSettingTab extends PluginSettingTab {
     new Setting(el).setName(t('autoShapes')).setDesc(t('autoShapesDesc')).addToggle((tg) => tg.setValue(s.hubStars).onChange((v) => { s.hubStars = v; save('data'); }));
     new Setting(el).setName(t('sStale')).setDesc(t('sStaleDesc')).addSlider((sl) => sl.setLimits(0, 365, 5).setValue(s.staleDays).setDynamicTooltip()
       .onChange((v) => { s.staleDays = v; save('heat'); }));
+    new Setting(el).setName(t('sThemeHead')).setDesc(p.themeActive() ? t('sThemeDesc') : t('sThemeDesc') + ' ' + t('sThemeInactive')).setHeading();
+    const th = s.themeOpts;
+    const thSave = () => { void p.saveSettings(); p.applyThemeOptions(); };
+    new Setting(el).setName(t('sThemeColor')).setDesc(t('sThemeColorDesc')).addDropdown((d) => {
+      for (const c of THEME_COLORS) d.addOption(c, t('tc_' + c));
+      d.setValue(th.color).onChange((v) => { th.color = v; thSave(); });
+    });
+    new Setting(el).setName(t('sThemeTextFont')).addDropdown((d) => d.addOption('inter', t('tf_inter')).addOption('system', t('tf_system'))
+      .setValue(th.textFont).onChange((v) => { th.textFont = v; thSave(); }));
+    new Setting(el).setName(t('sThemeHeadFont')).addDropdown((d) => d.addOption('grotesk', t('hf_grotesk')).addOption('text', t('hf_text'))
+      .setValue(th.headFont).onChange((v) => { th.headFont = v; thSave(); }));
+    const tog = (name: string, key: 'stars' | 'starsMotion' | 'nebula' | 'headingGlow' | 'gradient' | 'checkboxes', desc?: string) => {
+      const st = new Setting(el).setName(t(name)).addToggle((tg) => tg.setValue(th[key]).onChange((v) => { th[key] = v; thSave(); }));
+      if (desc) st.setDesc(t(desc));
+    };
+    tog('sThemeStars', 'stars', 'sThemeStarsDesc');
+    tog('sThemeMotion', 'starsMotion');
+    tog('sThemeNebula', 'nebula');
+    tog('sThemeGlow', 'headingGlow');
+    tog('sThemeGradient', 'gradient');
+    tog('sThemeChecks', 'checkboxes', 'sThemeChecksDesc');
     new Setting(el).setName(t('sBehavior')).setHeading();
     new Setting(el).setName(t('sFocusCam')).setDesc(t('sFocusCamDesc')).addToggle((tg) => tg.setValue(s.focusCamera).onChange((v) => { s.focusCamera = v; void p.saveSettings(); }));
     new Setting(el).setName(t('sClaudeLive')).setDesc(t('sClaudeLiveDesc')).addToggle((tg) => tg.setValue(s.claudeLive).onChange((v) => { s.claudeLive = v; void p.saveSettings(); }));
