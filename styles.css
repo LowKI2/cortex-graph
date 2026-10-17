@@ -146,7 +146,7 @@
 
 /* hidden folders in the explorer */
 .cg-fc-hidden > .nav-folder-title { opacity: .55; }
-.cg-fc-hidden > .nav-folder-title .nav-folder-title-content { text-decoration: line-through; text-decoration-color: color-mix(in srgb, currentColor 50%, transparent); }
+.cg-fc-hidden > .nav-folder-title .nav-folder-title-content { text-decoration-line: line-through; opacity: .7; }
 
 /* Folder galaxy label */
 .cg-galaxy-label { position: absolute; left: 0; top: 0; pointer-events: none; white-space: nowrap; font-size: 18px; font-weight: 700; letter-spacing: .06em;
@@ -188,9 +188,6 @@
 .cg-linkline line { stroke: #ffc04d; stroke-width: 2; stroke-dasharray: 6 4; }
 /* settings panel in two columns */
 .cg-panel { width: min(640px, calc(100% - 16px)); }
-.cg-panel-body { columns: 2 260px; column-gap: 22px; }
-.cg-sec-wrap { break-inside: avoid; }
-.cg-root.is-mobile .cg-panel-body { columns: 1; }
 .cg-linkline.is-on { display: block; }
 .cg-panel { bottom: auto; max-height: calc(100% - 56px); }
 .cg-sec-wrap { display: inline-block; width: 100%; margin-bottom: 10px; }
@@ -198,11 +195,9 @@
 
 /* controls (key/mouse bindings) – third column of the settings panel */
 .cg-panel { width: min(1240px, calc(100% - 16px)); }
-.cg-panel-body { columns: auto; display: flex; gap: 22px; align-items: flex-start; }
-.cg-pcols { flex: 2 1 540px; min-width: 0; columns: 2 240px; column-gap: 22px; }
+.cg-panel-body { display: flex; gap: 22px; align-items: flex-start; }
 .cg-controls { flex: 1 1 250px; min-width: 230px; }
 .cg-root.is-mobile .cg-panel-body { flex-direction: column; }
-.cg-root.is-mobile .cg-pcols { columns: 1; }
 .cg-root.is-mobile .cg-controls { width: 100%; }
 .cg-panel-body { flex-wrap: wrap; }
 .cg-ctrl-sub { margin-top: 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
@@ -216,7 +211,7 @@
 
 /* settings panel as tabs (one section at a time, graph stays visible) */
 .cg-panel { width: min(380px, calc(100% - 16px)); }
-.cg-panel-body { display: block; columns: auto; }
+.cg-panel-body { display: block; }
 .cg-tabpage { width: 100%; min-width: 0; margin: 0; }
 .cg-tabpage + .cg-tabpage > .cg-sec { margin-top: 14px; }
 .cg-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 8px; }
